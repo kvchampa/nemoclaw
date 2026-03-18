@@ -25,14 +25,14 @@ trap 'rm -rf "$tmpdir"' EXIT
 DOWNLOAD_URL="https://github.com/NVIDIA/OpenShell/releases/latest/download/$ASSET"
 
 # Download with better error handling
-if ! curl -fsSL "$DOWNLOAD_URL" -o "$tmpdir/openshell.tar.gz" 2>"$tmpdir/curl.err"; then
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$tmpdir/$ASSET" 2>"$tmpdir/curl.err"; then
   printf "Failed to download openshell from GitHub:\n" >&2
   cat "$tmpdir/curl.err" >&2
   fail "Could not download $ASSET"
 fi
 
 # Validate the downloaded file is actually a gzip tarball
-if ! file "$tmpdir/openshell.tar.gz" 2>/dev/null | grep -q "gzip compressed data"; then
+if ! file "$tmpdir/$ASSET" 2>/dev/null | grep -q "gzip compressed data"; then
   fail "Downloaded file is not a valid gzip tarball. GitHub may be unavailable or the release may be missing."
 fi
 
@@ -55,7 +55,7 @@ else
 fi
 
 # Extract tarball
-if ! tar xzf "$tmpdir/openshell.tar.gz" -C "$tmpdir" 2>"$tmpdir/tar.err"; then
+if ! tar xzf "$tmpdir/$ASSET" -C "$tmpdir" 2>"$tmpdir/tar.err"; then
   printf "Failed to extract tarball:\n" >&2
   cat "$tmpdir/tar.err" >&2
   fail "Could not extract $ASSET"
