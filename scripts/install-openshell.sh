@@ -40,14 +40,14 @@ fi
 CHECKSUM_URL="https://github.com/NVIDIA/OpenShell/releases/latest/download/SHA256SUMS"
 if curl -fsSL "$CHECKSUM_URL" -o "$tmpdir/SHA256SUMS" 2>/dev/null; then
   # Checksum file exists, verify it
-  if ! grep -q "$ASSET" "$tmpdir/SHA256SUMS"; then
+  # Use grep -F for literal string matching (prevents regex injection)
+  if ! grep -qF "$ASSET" "$tmpdir/SHA256SUMS"; then
     printf "Warning: Checksum not found for %s in SHA256SUMS\n" "$ASSET" >&2
   else
-    cd "$tmpdir"
-    if ! grep "$ASSET" SHA256SUMS | shasum -a 256 -c -s; then
+    # Verify checksum in a subshell to avoid changing directory
+    if ! (cd "$tmpdir" && grep -F "$ASSET" SHA256SUMS | shasum -a 256 -c -s); then
       fail "Checksum verification failed for $ASSET. File may be corrupted or tampered with."
     fi
-    cd - > /dev/null
     printf "✓ Checksum verified\n"
   fi
 else
