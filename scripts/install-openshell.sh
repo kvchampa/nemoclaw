@@ -45,7 +45,11 @@ if curl -fsSL "$CHECKSUM_URL" -o "$tmpdir/SHA256SUMS" 2>/dev/null; then
   # Checksum file exists, verify it
   # Use grep -F for literal string matching (prevents regex injection)
   if ! grep -qF "$ASSET" "$tmpdir/SHA256SUMS"; then
-    printf "Warning: Checksum not found for %s in SHA256SUMS\n" "$ASSET" >&2
+    if [ "${NEMOCLAW_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+      printf "Warning: Checksum not found for %s; continuing due to NEMOCLAW_ALLOW_UNVERIFIED=1\n" "$ASSET" >&2
+    else
+      fail "Checksum not found for $ASSET in SHA256SUMS. Set NEMOCLAW_ALLOW_UNVERIFIED=1 to bypass."
+    fi
   else
     # Verify checksum in a subshell to avoid changing directory
     if ! (cd "$tmpdir" && grep -F "$ASSET" SHA256SUMS | shasum -a 256 -c -s); then
@@ -54,7 +58,11 @@ if curl -fsSL "$CHECKSUM_URL" -o "$tmpdir/SHA256SUMS" 2>/dev/null; then
     printf "✓ Checksum verified\n"
   fi
 else
-  printf "Warning: No checksum file available, skipping integrity verification\n" >&2
+  if [ "${NEMOCLAW_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+    printf "Warning: No checksum file available; continuing due to NEMOCLAW_ALLOW_UNVERIFIED=1\n" >&2
+  else
+    fail "No checksum file available for verification. Set NEMOCLAW_ALLOW_UNVERIFIED=1 to bypass."
+  fi
 fi
 
 # Extract tarball
@@ -82,4 +90,5 @@ else
   sudo install -m 755 "$tmpdir/openshell" /usr/local/bin/openshell
 fi
 
-printf "openshell %s\n" "$(openshell --version 2>&1 || echo 'installed')"
+# Verify installation using the full path to ensure we check the just-installed binary
+printf "openshell %s\n" "$(/usr/local/bin/openshell --version 2>&1 || echo 'installed')"
