@@ -95,7 +95,6 @@ fi
 SANDBOX_NAME="${1:-nemoclaw}"
 info "Using sandbox name: ${SANDBOX_NAME}"
 
-<<<<<<< HEAD
 OPEN_SHELL_VERSION_RAW="$(openshell -V 2>/dev/null || true)"
 OPEN_SHELL_VERSION_LOWER="${OPEN_SHELL_VERSION_RAW,,}"
 if [[ "$OPEN_SHELL_VERSION_LOWER" =~ openshell[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+) ]]; then
@@ -105,15 +104,12 @@ if [[ "$OPEN_SHELL_VERSION_LOWER" =~ openshell[[:space:]]+([0-9]+\.[0-9]+\.[0-9]
 elif [[ -n "$OPEN_SHELL_VERSION_RAW" ]]; then
   warn "Could not parse openshell version from 'openshell -V': ${OPEN_SHELL_VERSION_RAW}"
   warn "Skipping OpenShell gateway image pinning."
-=======
+fi
+
 # 0. Check for conflicting Kubernetes — cgroupns=host + host kubelet = crash loop
 # See: https://github.com/NVIDIA/NemoClaw/issues/431
-if pgrep -x kubelet > /dev/null 2>&1 || pgrep -x kubelite > /dev/null 2>&1 || pgrep -x k3s > /dev/null 2>&1 || systemctl is-active --quiet k3s 2>/dev/null || systemctl is-active --quiet k3s-agent 2>/dev/null; then
-  warn "⚠️  A Kubernetes kubelet is running on this host."
-  warn "The gateway's embedded k3s may conflict over cgroup paths (kubepods)."
-  warn "If the gateway fails with CrashLoopBackOff, stop the host Kubernetes first:"
-  warn "  sudo microk8s stop / sudo systemctl stop k3s / sudo systemctl stop kubelet"
->>>>>>> 0214255 (fix: detect conflicting host kubelet before gateway start)
+if detect_kubelet_conflict; then
+  warn_kubelet_conflict "$KUBELET_CONFLICT_DETAIL"
 fi
 
 # 1. Gateway — always start fresh to avoid stale state
