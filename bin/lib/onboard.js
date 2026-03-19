@@ -545,101 +545,95 @@ async function createSandbox(gpu) {
   };
   process.on("exit", cleanupBuildCtx);
 
-  fs.copyFileSync(path.join(ROOT, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
-  run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
-  run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
-  run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
-  run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
+  try {
+    fs.copyFileSync(path.join(ROOT, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
+    run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
+    run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
+    run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
+    run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
 
-  // Create sandbox (use -- echo to avoid dropping into interactive shell)
-  // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
-  const basePolicyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
-  const createArgs = [
-    `--from "${buildCtx}/Dockerfile"`,
-    `--name "${sandboxName}"`,
-    `--policy "${basePolicyPath}"`,
-  ];
-  // --gpu is intentionally omitted. See comment in startGateway().
+    // Create sandbox (use -- echo to avoid dropping into interactive shell)
+    // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
+    const basePolicyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+    const createArgs = [
+      `--from "${buildCtx}/Dockerfile"`,
+      `--name "${sandboxName}"`,
+      `--policy "${basePolicyPath}"`,
+    ];
+    // --gpu is intentionally omitted. See comment in startGateway().
 
-  console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
-  const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
-  if (process.env.NVIDIA_API_KEY) {
-    envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);
-  }
-  const discordToken = getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN;
-  if (discordToken) {
-    envArgs.push(`DISCORD_BOT_TOKEN=${shellQuote(discordToken)}`);
-  }
-  const slackToken = getCredential("SLACK_BOT_TOKEN") || process.env.SLACK_BOT_TOKEN;
-  if (slackToken) {
-    envArgs.push(`SLACK_BOT_TOKEN=${shellQuote(slackToken)}`);
-  }
+    console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
+    const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
+    const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
+    if (process.env.NVIDIA_API_KEY) {
+      envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);
+    }
+    const discordToken = getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN;
+    if (discordToken) {
+      envArgs.push(`DISCORD_BOT_TOKEN=${shellQuote(discordToken)}`);
+    }
+    const slackToken = getCredential("SLACK_BOT_TOKEN") || process.env.SLACK_BOT_TOKEN;
+    if (slackToken) {
+      envArgs.push(`SLACK_BOT_TOKEN=${shellQuote(slackToken)}`);
+    }
 
-  // Run without piping through awk — the pipe masked non-zero exit codes
-  // from openshell because bash returns the status of the last pipeline
-  // command (awk, always 0) unless pipefail is set. Removing the pipe
-  // lets the real exit code flow through to run().
-  const createResult = await streamSandboxCreate(
-    `openshell sandbox create ${createArgs.join(" ")} -- env ${envArgs.join(" ")} nemoclaw-start 2>&1`
-  );
+    // Run without piping through awk — the pipe masked non-zero exit codes
+    // from openshell because bash returns the status of the last pipeline
+    // command (awk, always 0) unless pipefail is set. Removing the pipe
+    // lets the real exit code flow through to run().
+    const createResult = await streamSandboxCreate(
+      `openshell sandbox create ${createArgs.join(" ")} -- env ${envArgs.join(" ")} nemoclaw-start 2>&1`
+    );
 
-  // Clean up build context regardless of outcome
-  cleanupBuildCtx();
-
-  if (createResult.status !== 0) {
-    console.error("");
-    console.error(`  Sandbox creation failed (exit ${createResult.status}).`);
-    if (createResult.output) {
+    if (createResult.status !== 0) {
       console.error("");
-      console.error(createResult.output);
+      console.error(`  Sandbox creation failed (exit ${createResult.status}).`);
+      if (createResult.output) {
+        console.error("");
+        console.error(createResult.output);
+      }
+      console.error("  Try:  openshell sandbox list        # check gateway state");
+      console.error("  Try:  nemoclaw onboard              # retry from scratch");
+      process.exit(createResult.status || 1);
     }
-    console.error("  Try:  openshell sandbox list        # check gateway state");
-    console.error("  Try:  nemoclaw onboard              # retry from scratch");
-    process.exit(createResult.status || 1);
-  }
 
-  // Wait for sandbox to reach Ready state in k3s before registering.
-  // On WSL2 + Docker Desktop the pod can take longer to initialize;
-  // without this gate, NemoClaw registers a phantom sandbox that
-  // causes "sandbox not found" on every subsequent connect/status call.
-  console.log("  Waiting for sandbox to become ready...");
-  let ready = false;
-  for (let i = 0; i < 30; i++) {
-    const list = runCapture("openshell sandbox list 2>&1", { ignoreError: true });
-    if (isSandboxReady(list, sandboxName)) {
-      ready = true;
-      break;
+    // Wait for sandbox to reach Ready state in k3s before registering.
+    // On WSL2 + Docker Desktop the pod can take longer to initialize;
+    // without this gate, NemoClaw registers a phantom sandbox that
+    // causes "sandbox not found" on every subsequent connect/status call.
+    console.log("  Waiting for sandbox to become ready...");
+    let ready = false;
+    for (let i = 0; i < 30; i++) {
+      const list = runCapture("openshell sandbox list 2>&1", { ignoreError: true });
+      if (isSandboxReady(list, sandboxName)) {
+        ready = true;
+        break;
+      }
+      require("child_process").spawnSync("sleep", ["2"]);
     }
-    require("child_process").spawnSync("sleep", ["2"]);
-  }
 
-  if (!ready) {
-    // Clean up the orphaned sandbox so the next onboard retry with the same
-    // name doesn't fail on "sandbox already exists".
-    const delResult = run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
-    console.error("");
-    console.error(`  Sandbox '${sandboxName}' was created but did not become ready within 60s.`);
-    if (delResult.status === 0) {
-      console.error("  The orphaned sandbox has been removed — you can safely retry.");
-    } else {
-      console.error(`  Could not remove the orphaned sandbox. Manual cleanup:`);
-      console.error(`    openshell sandbox delete "${sandboxName}"`);
+    if (!ready) {
+      const delResult = run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
+      console.error("");
+      console.error(`  Sandbox '${sandboxName}' was created but did not become ready within 60s.`);
+      if (delResult.status === 0) {
+        console.error("  The orphaned sandbox has been removed — you can safely retry.");
+      } else {
+        console.error(`  Could not remove the orphaned sandbox. Manual cleanup:`);
+        console.error(`    openshell sandbox delete "${sandboxName}"`);
+      }
+      console.error("  Retry: nemoclaw onboard");
+      process.exit(1);
     }
-    console.error("  Retry: nemoclaw onboard");
-    process.exit(1);
+
+    // Release any stale forward on port 18789 before claiming it for the new sandbox.
+    run(`openshell forward stop 18789 2>/dev/null || true`, { ignoreError: true });
+    // Forward dashboard port to the new sandbox
+    run(`openshell forward start --background 18789 "${sandboxName}"`, { ignoreError: true });
+  } finally {
+    cleanupBuildCtx();
+    process.removeListener("exit", cleanupBuildCtx);
   }
-
-  // Release any stale forward on port 18789 before claiming it for the new sandbox.
-  // A previous onboard run may have left the port forwarded to a different sandbox,
-  // which would silently prevent the new sandbox's dashboard from being reachable.
-  run(`openshell forward stop 18789 2>/dev/null || true`, { ignoreError: true });
-  // Forward dashboard port to the new sandbox
-  run(`openshell forward start --background 18789 "${sandboxName}"`, { ignoreError: true });
-
-  // Clean up build context and deregister the exit handler
-  cleanupBuildCtx();
-  process.removeListener("exit", cleanupBuildCtx);
 
   // Register only after confirmed ready — prevents phantom entries
   registry.registerSandbox({
