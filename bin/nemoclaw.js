@@ -114,6 +114,11 @@ async function deploy(instanceName) {
     console.error("    nemoclaw deploy nemoclaw-test");
     process.exit(1);
   }
+  // Validate instance name to prevent shell injection
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(instanceName)) {
+    console.error("  Invalid instance name. Use alphanumeric characters, dots, hyphens, and underscores.");
+    process.exit(1);
+  }
   await ensureApiKey();
   if (isRepoPrivate("NVIDIA/OpenShell")) {
     await ensureGithubToken();
