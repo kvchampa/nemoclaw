@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const { describe, it, beforeEach } = require("node:test");
-const assert = require("node:assert/strict");
-const { execSync, spawnSync } = require("child_process");
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
+import { describe, it, expect } from "vitest";
+import { execSync } from "node:child_process";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
-const SETUP_APPLE_SCRIPT = path.join(__dirname, "..", "scripts", "setup-apple.sh");
+const SETUP_APPLE_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "setup-apple.sh");
 
 // Helper: run the setup-apple script with a mocked environment
 // Redirects stderr to stdout so all output (info + warn) is captured together.
@@ -68,15 +67,12 @@ function createMockScript(commands) {
 }
 
 // Helpers for common precondition checks
-function requireDarwin(t) {
-  if (process.platform !== "darwin") { t.skip("requires macOS"); return false; }
-  return true;
+function isDarwin() {
+  return process.platform === "darwin";
 }
 
-function requireAppleSilicon(t) {
-  if (!requireDarwin(t)) return false;
-  if (process.arch !== "arm64") { t.skip("requires Apple Silicon"); return false; }
-  return true;
+function isAppleSilicon() {
+  return isDarwin() && process.arch === "arm64";
 }
 
 function hasCommand(cmd) {
@@ -91,51 +87,38 @@ function isDockerRunning() {
 
 describe("setup-apple.sh", () => {
   describe("Platform detection", () => {
-    it("fails on non-macOS platforms", function () {
-      if (process.platform === "darwin") {
-        this.skip("can only verify failure on non-macOS");
-        return;
-      }
+    it.skipIf(isDarwin())("fails on non-macOS platforms", () => {
       const result = runSetupApple();
-      assert.equal(result.code, 1);
-      assert.ok(
+      expect(result.code).toBe(1);
+      expect(
         result.err.includes("macOS") || result.out.includes("macOS"),
-        "Should mention macOS requirement"
-      );
+      ).toBe(true);
     });
 
-    it("detects macOS and shows version", function () {
-      if (!requireDarwin(this)) return;
-
+    it.skipIf(!isDarwin())("detects macOS and shows version", () => {
       const result = runSetupApple();
-      assert.ok(
+      expect(
         result.out.includes("macOS detected") || result.err.includes("Node.js not found"),
-        "Should detect macOS or fail on later checks"
-      );
+      ).toBe(true);
     });
   });
 
   describe("Node.js version checks", () => {
-    it("fails when Node.js is not found", function () {
-      if (!requireDarwin(this)) return;
-
-      const { dir, mockBin } = createMockScript({});
+    it.skipIf(!isDarwin())("fails when Node.js is not found", () => {
+      const { mockBin } = createMockScript({});
       const result = runSetupApple({
         PATH: mockBin,
       });
 
-      assert.notEqual(result.code, 0, "Should exit with non-zero code");
+      expect(result.code).not.toBe(0);
       const output = result.out + result.err;
-      assert.ok(
+      expect(
         output.includes("Node.js") || result.code !== 0,
-        "Should report Node.js issue or fail"
-      );
+      ).toBe(true);
     });
 
-    it("fails when Node.js version is less than 20", function () {
-      if (!requireDarwin(this)) return;
-
-      const { dir, mockBin } = createMockScript({
+    it.skipIf(!isDarwin())("fails when Node.js version is less than 20", () => {
+      const { mockBin } = createMockScript({
         node: {
           script: `#!/usr/bin/env bash
 if [[ "$1" == "-v" ]]; then
@@ -154,250 +137,199 @@ fi
         PATH: mockBin + ":" + process.env.PATH,
       });
 
-      assert.equal(result.code, 1);
-      assert.ok(
+      expect(result.code).toBe(1);
+      expect(
         result.err.includes("Node.js 20+ required") || result.out.includes("Node.js 20+ required"),
-        "Should report Node.js 20+ requirement"
-      );
+      ).toBe(true);
     });
 
-    it("passes when Node.js version is 20 or higher", function () {
-      if (!requireDarwin(this)) return;
-      const nodeVersion = parseInt(process.versions.node.split(".")[0]);
-      if (nodeVersion < 20) { this.skip("host Node.js < 20"); return; }
-
-      const result = runSetupApple();
-      assert.ok(
-        result.out.includes("Node.js") && result.out.includes("OK"),
-        "Should show Node.js OK"
-      );
-    });
+    it.skipIf(!isDarwin() || parseInt(process.versions.node.split(".")[0]) < 20)(
+      "passes when Node.js version is 20 or higher", () => {
+        const result = runSetupApple();
+        expect(
+          result.out.includes("Node.js") && result.out.includes("OK"),
+        ).toBe(true);
+      },
+    );
   });
 
   describe("Docker socket detection", () => {
-    it("detects Docker Desktop socket when available", function () {
-      if (!requireDarwin(this)) return;
-      const desktopSocket = path.join(os.homedir(), ".docker/run/docker.sock");
-      if (!fs.existsSync(desktopSocket)) { this.skip("no Docker Desktop socket"); return; }
+    it.skipIf(!isDarwin() || !fs.existsSync(path.join(os.homedir(), ".docker/run/docker.sock")))(
+      "detects Docker Desktop socket when available", () => {
+        const result = runSetupApple();
+        expect(
+          result.out.includes("Docker Desktop detected") || result.out.includes("Docker memory"),
+        ).toBe(true);
+      },
+    );
 
+    it.skipIf(
+      !isDarwin() ||
+      (!fs.existsSync(path.join(os.homedir(), ".colima/default/docker.sock")) &&
+       !fs.existsSync(path.join(os.homedir(), ".config/colima/default/docker.sock"))),
+    )("detects Colima socket when available", () => {
       const result = runSetupApple();
-      assert.ok(
-        result.out.includes("Docker Desktop detected") || result.out.includes("Docker memory"),
-        "Should detect Docker Desktop"
-      );
-    });
-
-    it("detects Colima socket when available", function () {
-      if (!requireDarwin(this)) return;
-      const s1 = path.join(os.homedir(), ".colima/default/docker.sock");
-      const s2 = path.join(os.homedir(), ".config/colima/default/docker.sock");
-      if (!fs.existsSync(s1) && !fs.existsSync(s2)) { this.skip("no Colima socket"); return; }
-
-      const result = runSetupApple();
-      assert.ok(result.out.includes("Colima detected"), "Should detect Colima");
+      expect(result.out.includes("Colima detected")).toBe(true);
     });
   });
 
   describe("Docker memory allocation checks", () => {
-    it("shows OK when Docker memory is 8GB or more", function () {
-      if (!requireDarwin(this)) return;
-      if (!isDockerRunning()) { this.skip("Docker not running"); return; }
+    it.skipIf(!isDarwin() || !isDockerRunning())(
+      "shows OK when Docker memory is 8GB or more", () => {
+        let memGB;
+        try {
+          const memBytes = execSync("docker info --format '{{.MemTotal}}' 2>/dev/null", {
+            encoding: "utf-8", timeout: 5000,
+          }).trim();
+          memGB = Math.floor(parseInt(memBytes) / (1024 * 1024 * 1024));
+        } catch {
+          return; // skip if can't query
+        }
+        if (memGB < 8) return; // skip if not enough memory
 
-      let memGB;
-      try {
-        const memBytes = execSync("docker info --format '{{.MemTotal}}' 2>/dev/null", {
-          encoding: "utf-8", timeout: 5000,
-        }).trim();
-        memGB = Math.floor(parseInt(memBytes) / (1024 * 1024 * 1024));
-      } catch {
-        this.skip("could not query Docker memory"); return;
-      }
-      if (memGB < 8) { this.skip(`Docker has ${memGB}GB < 8GB`); return; }
-
-      const result = runSetupApple();
-      assert.ok(
-        result.out.includes("Docker memory") && result.out.includes("GB"),
-        "Should show Docker memory info"
-      );
-    });
+        const result = runSetupApple();
+        expect(
+          result.out.includes("Docker memory") && result.out.includes("GB"),
+        ).toBe(true);
+      },
+    );
   });
 
   describe("Ollama detection", () => {
-    it("detects installed Ollama", function () {
-      if (!requireDarwin(this)) return;
-      if (!hasCommand("ollama")) { this.skip("Ollama not installed"); return; }
-
+    it.skipIf(!isDarwin() || !hasCommand("ollama"))("detects installed Ollama", () => {
       const result = runSetupApple();
-      assert.ok(
+      expect(
         result.out.includes("Ollama installed") || result.out.includes("Ollama is"),
-        "Should detect Ollama installation"
-      );
+      ).toBe(true);
     });
 
-    it("checks if Ollama is running", function () {
-      if (!requireDarwin(this)) return;
-      if (!hasCommand("ollama")) { this.skip("Ollama not installed"); return; }
+    it.skipIf(!isDarwin() || !hasCommand("ollama"))("checks if Ollama is running", () => {
       try {
         execSync("curl -sf http://localhost:11434/api/tags", {
           encoding: "utf-8", timeout: 2000, stdio: "pipe",
         });
       } catch {
-        this.skip("Ollama not running"); return;
+        return; // skip if Ollama not running
       }
 
       const result = runSetupApple();
-      assert.ok(
+      expect(
         result.out.includes("running") || result.out.includes("localhost:11434"),
-        "Should detect running Ollama"
-      );
+      ).toBe(true);
     });
 
-    it("warns about OLLAMA_HOST when unset", function () {
-      if (!requireDarwin(this)) return;
-      if (!hasCommand("ollama")) { this.skip("Ollama not installed"); return; }
-      if (process.env.OLLAMA_HOST) { this.skip("OLLAMA_HOST already set"); return; }
-
-      const result = runSetupApple();
-      const output = result.out + result.err;
-      assert.ok(
-        output.includes("OLLAMA_HOST") && output.includes("0.0.0.0:11434"),
-        "Should warn about OLLAMA_HOST configuration"
-      );
-    });
+    it.skipIf(!isDarwin() || !hasCommand("ollama") || !!process.env.OLLAMA_HOST)(
+      "warns about OLLAMA_HOST when unset", () => {
+        const result = runSetupApple();
+        const output = result.out + result.err;
+        expect(
+          output.includes("OLLAMA_HOST") && output.includes("0.0.0.0:11434"),
+        ).toBe(true);
+      },
+    );
   });
 
   describe("OpenShell CLI", () => {
-    it("detects installed openshell CLI", function () {
-      if (!requireDarwin(this)) return;
-      if (!hasCommand("openshell")) { this.skip("openshell not installed"); return; }
-
+    it.skipIf(!isDarwin() || !hasCommand("openshell"))("detects installed openshell CLI", () => {
       const result = runSetupApple();
-      assert.ok(result.out.includes("openshell CLI"), "Should detect openshell CLI");
+      expect(result.out.includes("openshell CLI")).toBe(true);
     });
 
-    it("runs openshell doctor check after installation", function () {
-      if (!requireDarwin(this)) return;
-      if (!hasCommand("openshell")) { this.skip("openshell not installed"); return; }
-      if (!isDockerRunning()) { this.skip("Docker not running"); return; }
-
-      const result = runSetupApple();
-      assert.ok(
-        result.out.includes("openshell doctor check") ||
-        result.err.includes("openshell doctor check"),
-        "Should run openshell doctor check"
-      );
-    });
+    it.skipIf(!isDarwin() || !hasCommand("openshell") || !isDockerRunning())(
+      "runs openshell doctor check after installation", () => {
+        const result = runSetupApple();
+        expect(
+          result.out.includes("openshell doctor check") ||
+          result.err.includes("openshell doctor check"),
+        ).toBe(true);
+      },
+    );
 
     it("install-openshell.sh script exists", () => {
-      const installScript = path.join(__dirname, "..", "scripts", "install-openshell.sh");
-      assert.ok(fs.existsSync(installScript), "install-openshell.sh should exist");
+      const installScript = path.join(import.meta.dirname, "..", "scripts", "install-openshell.sh");
+      expect(fs.existsSync(installScript)).toBe(true);
     });
   });
 
   describe("Apple GPU detection", () => {
-    it("detects Apple GPU and chipset", function () {
-      if (!requireAppleSilicon(this)) return;
-
+    it.skipIf(!isAppleSilicon())("detects Apple GPU and chipset", () => {
       const result = runSetupApple();
       if (result.code === 0) {
-        assert.ok(result.out.includes("Apple GPU"), "Should detect Apple GPU");
+        expect(result.out.includes("Apple GPU")).toBe(true);
       }
     });
 
-    it("detects unified memory size", function () {
-      if (!requireAppleSilicon(this)) return;
-
+    it.skipIf(!isAppleSilicon())("detects unified memory size", () => {
       const result = runSetupApple();
       if (result.code === 0 && result.out.includes("Unified memory")) {
-        assert.ok(
+        expect(
           result.out.includes("GB") && result.out.includes("Unified memory"),
-          "Should show unified memory size"
-        );
+        ).toBe(true);
       }
     });
 
-    it("shows cloud inference note for Apple Silicon", function () {
-      if (!requireAppleSilicon(this)) return;
-
+    it.skipIf(!isAppleSilicon())("shows cloud inference note for Apple Silicon", () => {
       const result = runSetupApple();
       if (result.code === 0) {
-        assert.ok(
+        expect(
           result.out.includes("NVIDIA GPU") || result.out.includes("cloud"),
-          "Should mention cloud inference for Apple Silicon"
-        );
+        ).toBe(true);
       }
     });
   });
 
   describe("nvm detection and warnings", () => {
-    it("warns when nvm is detected", function () {
-      if (!requireDarwin(this)) return;
+    it.skipIf(!isDarwin())("warns when nvm is detected", () => {
       const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), ".nvm");
-      if (!process.env.NVM_DIR && !fs.existsSync(nvmDir)) { this.skip("nvm not detected"); return; }
+      if (!process.env.NVM_DIR && !fs.existsSync(nvmDir)) return; // skip if nvm not detected
 
       const result = runSetupApple();
       const output = result.out + result.err;
-      assert.ok(
+      expect(
         output.includes("nvm") && output.includes("alias default"),
-        "Should warn about nvm and suggest pinning version"
-      );
+      ).toBe(true);
     });
   });
 
   describe("Success completion", () => {
-    it("shows next steps message on completion", function () {
-      if (!requireDarwin(this)) return;
-
+    it.skipIf(!isDarwin())("shows next steps message on completion", () => {
       const result = runSetupApple();
       if (result.code === 0) {
-        assert.ok(
+        expect(
           result.out.includes("nemoclaw onboard") || result.out.includes("Next step"),
-          "Should show next steps for onboarding"
-        );
+        ).toBe(true);
       }
     });
 
-    it("shows setup checks complete message", function () {
-      if (!requireDarwin(this)) return;
-
+    it.skipIf(!isDarwin())("shows setup checks complete message", () => {
       const result = runSetupApple();
       if (result.code === 0) {
-        assert.ok(
+        expect(
           result.out.includes("setup checks complete"),
-          "Should indicate setup checks are complete"
-        );
+        ).toBe(true);
       }
     });
   });
 
   describe("Error handling", () => {
-    it("exits with non-zero code on errors", function () {
-      if (!requireDarwin(this)) return;
-
-      const { dir, mockBin } = createMockScript({});
+    it.skipIf(!isDarwin())("exits with non-zero code on errors", () => {
+      const { mockBin } = createMockScript({});
       const result = runSetupApple({ PATH: mockBin });
-      assert.notEqual(result.code, 0, "Should exit with non-zero code on error");
+      expect(result.code).not.toBe(0);
     });
 
-    it("stops execution on first critical error (set -e)", function () {
-      if (!requireDarwin(this)) return;
-
-      const { dir, mockBin } = createMockScript({});
+    it.skipIf(!isDarwin())("stops execution on first critical error (set -e)", () => {
+      const { mockBin } = createMockScript({});
       const result = runSetupApple({ PATH: mockBin });
       // Should fail on Node.js/uname check and not proceed to Docker checks
-      assert.notEqual(result.code, 0, "Should fail early on critical errors");
-      assert.ok(
-        !result.out.includes("Docker"),
-        "Should not reach Docker checks after early failure"
-      );
+      expect(result.code).not.toBe(0);
+      expect(result.out.includes("Docker")).toBe(false);
     });
   });
 
   describe("CLI integration", () => {
-    it("can be invoked via nemoclaw setup-apple", function () {
-      if (!requireDarwin(this)) return;
-
-      const CLI = path.join(__dirname, "..", "bin", "nemoclaw.js");
+    it.skipIf(!isDarwin())("can be invoked via nemoclaw setup-apple", () => {
+      const CLI = path.join(import.meta.dirname, "..", "bin", "nemoclaw.js");
 
       try {
         const out = execSync(`node "${CLI}" setup-apple 2>&1`, {
@@ -406,16 +338,14 @@ fi
           stdio: "pipe",
         });
 
-        assert.ok(
+        expect(
           out.includes("macOS") || out.includes("Node.js") || out.includes("Docker"),
-          "Should execute setup-apple script"
-        );
+        ).toBe(true);
       } catch (err) {
         const output = (err.stdout || "") + (err.stderr || "");
-        assert.ok(
+        expect(
           output.includes("macOS") || output.includes("Node.js"),
-          "Should execute setup-apple script even if checks fail"
-        );
+        ).toBe(true);
       }
     });
   });
