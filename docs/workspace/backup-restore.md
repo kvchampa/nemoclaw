@@ -73,7 +73,7 @@ The repository includes a convenience script at `scripts/backup-workspace.sh`.
 ```console
 $ ./scripts/backup-workspace.sh backup my-assistant
 Backing up workspace from sandbox 'my-assistant'...
-Backup saved to /home/user/.nemoclaw/backups/20260320-120000/
+Backup saved to /home/user/.nemoclaw/backups/20260320-120000/ (6 items)
 ```
 
 ### Restore

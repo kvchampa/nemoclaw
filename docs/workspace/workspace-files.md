@@ -1,6 +1,6 @@
 ---
 title:
-  page: "Workspace Files — SOUL.md, USER.md, IDENTITY.md, and AGENTS.md"
+  page: "Workspace Files"
   nav: "Workspace Files"
 description: "What workspace personality and configuration files are, where they live, and how they persist across sandbox restarts."
 keywords: ["nemoclaw workspace files", "soul.md", "user.md", "identity.md", "agents.md", "sandbox persistence"]
@@ -38,7 +38,7 @@ These files live at `/sandbox/.openclaw/workspace/` and are collectively called 
 
 All workspace files reside inside the sandbox filesystem:
 
-```
+```text
 /sandbox/.openclaw/workspace/
 ├── AGENTS.md
 ├── IDENTITY.md
@@ -59,15 +59,15 @@ Understanding when these files persist and when they are lost is critical.
 Sandbox restarts (`nemoclaw <name> restart` or `openshell sandbox restart`) preserve workspace files.
 The sandbox uses a **Persistent Volume Claim (PVC)** that outlives individual container restarts.
 
-### Lost: Gateway Destroy
+### Lost: Sandbox Destroy
 
 Running `nemoclaw <name> destroy` **deletes the sandbox and its PVC**.
 All workspace files are permanently lost unless you back them up first.
 
-```{warning}
+:::{warning}
 Always back up your workspace files before running `nemoclaw <name> destroy`.
 See [Backup and Restore](backup-restore.md) for instructions.
-```
+:::
 
 ## Editing Workspace Files
 
