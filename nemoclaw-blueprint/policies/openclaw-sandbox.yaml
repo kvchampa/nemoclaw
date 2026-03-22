@@ -50,10 +50,12 @@ tool_policy:
       paths:
         - "**/.openclaw/openclaw.json"
         - "/etc/openclaw/openclaw.json"
+        - "/tmp/openclaw/openclaw.json"
     - tool: edit
       paths:
         - "**/.openclaw/openclaw.json"
         - "/etc/openclaw/openclaw.json"
+        - "/tmp/openclaw/openclaw.json"
     - tool: exec
       commands:
         - "openclaw gateway run"
