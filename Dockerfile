@@ -192,7 +192,7 @@ RUN openclaw doctor --fix > /dev/null 2>&1 || true \
 USER root
 RUN chown root:root /sandbox/.openclaw \
     && find /sandbox/.openclaw -mindepth 1 -maxdepth 1 -exec chown -h root:root {} + \
-    && chmod 755 /sandbox/.openclaw \
+    && chmod 0555 /sandbox/.openclaw \
     && chmod 444 /sandbox/.openclaw/openclaw.json
 
 # Pin config hash at build time so the entrypoint can verify integrity.

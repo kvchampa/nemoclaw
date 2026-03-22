@@ -56,12 +56,9 @@ tool_policy:
         - "**/.openclaw/openclaw.json"
         - "/etc/openclaw/openclaw.json"
         - "/tmp/openclaw/openclaw.json"
-    - tool: exec
-      commands:
-        - "openclaw gateway run"
-        - "openclaw gateway stop"
-        - "openclaw gateway restart"
-        - "kill"
+    # NOTE: exec command restrictions are handled at the OpenShell/sandbox level
+    # via security=allowlist mode, not through tool_policy (which only gates tool
+    # names, not individual commands).
 
 process:
   run_as_user: sandbox

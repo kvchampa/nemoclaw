@@ -170,7 +170,7 @@ Egress control, operator approval flow, and policy configuration.
 :link: workspace/workspace-files
 :link-type: doc
 
-Understand SOUL.md, USER.md, and other workspace files, plus backup and restore.
+Understand `SOUL.md`, `USER.md`, and other workspace files, plus backup and restore.
 
 +++
 {bdg-secondary}`Concept`
