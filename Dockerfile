@@ -121,13 +121,10 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64}
 
 WORKDIR /sandbox
-USER sandbox
 
 # Write the COMPLETE openclaw.json to /etc/openclaw/ (immutable config dir).
 # This keeps the config outside the agent-writable zone entirely.
-# The symlink at ~/.openclaw/openclaw.json points here so OpenClaw finds it.
 # Auth token is generated per build so each image has a unique token.
-# Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
 # At runtime, nemoclaw-start.sh copies this template to /tmp/openclaw/ for
 # any runtime mutations (e.g. auth profile injection).
 # Ref: #514, #516, #654
@@ -185,8 +182,6 @@ RUN openclaw doctor --fix > /dev/null 2>&1 || true \
 
 # Lock openclaw.json via DAC: chown to root so the sandbox user cannot modify
 # it at runtime.  This works regardless of Landlock enforcement status.
-# The Landlock policy (/sandbox/.openclaw in read_only) provides defense-in-depth
-# once OpenShell enables enforcement.
 # Ref: https://github.com/NVIDIA/NemoClaw/issues/514
 # Lock the entire .openclaw directory tree.
 # SECURITY: chmod 755 (not 1777) — the sandbox user can READ but not WRITE
