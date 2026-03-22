@@ -56,7 +56,7 @@ Understanding when these files persist and when they are lost is critical.
 
 ### Survives: Sandbox Restart
 
-Sandbox restarts (`nemoclaw <name> restart` or `openshell sandbox restart`) preserve workspace files.
+Sandbox restarts (`openshell sandbox restart`) preserve workspace files.
 The sandbox uses a **Persistent Volume Claim (PVC)** that outlives individual container restarts.
 
 ### Lost: Sandbox Destroy
