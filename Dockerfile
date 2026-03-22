@@ -123,12 +123,16 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
 WORKDIR /sandbox
 USER sandbox
 
-# Write the COMPLETE openclaw.json including gateway config and auth token.
-# This file is immutable at runtime (Landlock read-only on /sandbox/.openclaw).
-# No runtime writes to openclaw.json are needed or possible.
-# Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
+# Write the COMPLETE openclaw.json to /etc/openclaw/ (immutable config dir).
+# This keeps the config outside the agent-writable zone entirely.
+# The symlink at ~/.openclaw/openclaw.json points here so OpenClaw finds it.
 # Auth token is generated per build so each image has a unique token.
-RUN python3 -c "\
+# Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
+# At runtime, nemoclaw-start.sh copies this template to /tmp/openclaw/ for
+# any runtime mutations (e.g. auth profile injection).
+# Ref: #514, #516, #654
+USER root
+RUN mkdir -p /etc/openclaw && python3 -c "\
 import base64, json, os, secrets; \
 from urllib.parse import urlparse; \
 model = os.environ['NEMOCLAW_MODEL']; \
@@ -165,9 +169,15 @@ config = { \
         'auth': {'token': secrets.token_hex(32)} \
     } \
 }; \
-path = os.path.expanduser('~/.openclaw/openclaw.json'); \
-json.dump(config, open(path, 'w'), indent=2); \
-os.chmod(path, 0o600)"
+json.dump(config, open('/etc/openclaw/openclaw.json', 'w'), indent=2); \
+os.chmod('/etc/openclaw/openclaw.json', 0o444)" \
+    && chmod 555 /etc/openclaw
+USER sandbox
+
+# Symlink so OpenClaw finds config at the expected path.
+# At runtime, nemoclaw-start.sh replaces this with a link to /tmp/openclaw/
+# (mutable runtime copy of the immutable /etc template).
+RUN ln -sf /etc/openclaw/openclaw.json /sandbox/.openclaw/openclaw.json
 
 # Install NemoClaw plugin into OpenClaw
 RUN openclaw doctor --fix > /dev/null 2>&1 || true \
