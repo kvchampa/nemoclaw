@@ -63,7 +63,14 @@ template_path = '/etc/openclaw/openclaw.json'
 runtime_dir = '/tmp/openclaw'
 runtime_path = os.path.join(runtime_dir, 'openclaw.json')
 
-os.makedirs(runtime_dir, exist_ok=True)
+# Prevent TOCTOU: wipe any pre-existing /tmp/openclaw/ that the sandboxed
+# agent might have planted before this (root-owned) entrypoint runs.
+import shutil as _shutil
+try:
+    _shutil.rmtree(runtime_dir)
+except FileNotFoundError:
+    pass
+os.makedirs(runtime_dir, mode=0o700)
 
 cfg = {}
 if os.path.exists(template_path):
