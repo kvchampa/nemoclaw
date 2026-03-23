@@ -8,6 +8,33 @@ const { detectDockerHost } = require("./platform");
 const ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPTS = path.join(ROOT, "scripts");
 
+/**
+ * Redact known secret patterns from a string to prevent credential leaks
+ * in logs, error messages, and terminal output.
+ *
+ * Matches:
+ *  - Environment-style assignments: NVIDIA_API_KEY=sk-... → NVIDIA_API_KEY=<REDACTED>
+ *  - NVIDIA API key prefix:         nvapi-Abc123...       → <REDACTED>
+ *  - GitHub PAT prefix:             ghp_Abc123...         → <REDACTED>
+ *  - Bearer tokens:                 Bearer eyJhb...       → Bearer <REDACTED>
+ */
+const SECRET_PATTERNS = [
+  { re: /(NVIDIA_API_KEY|API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|_KEY)=\S+/gi, replacement: "$1=<REDACTED>" },
+  { re: /nvapi-[A-Za-z0-9_-]{10,}/g, replacement: "<REDACTED>" },
+  { re: /ghp_[A-Za-z0-9]{30,}/g, replacement: "<REDACTED>" },
+  { re: /(Bearer )\S+/gi, replacement: "$1<REDACTED>" },
+];
+
+function redactSecrets(str) {
+  if (typeof str !== "string") return str;
+  let result = str;
+  for (const { re, replacement } of SECRET_PATTERNS) {
+    re.lastIndex = 0;
+    result = result.replace(re, replacement);
+  }
+  return result;
+}
+
 const dockerHost = detectDockerHost();
 if (dockerHost) {
   process.env.DOCKER_HOST = dockerHost.dockerHost;
@@ -22,7 +49,7 @@ function run(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${cmd.slice(0, 80)}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
   return result;
@@ -37,7 +64,7 @@ function runInteractive(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${cmd.slice(0, 80)}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
   return result;
@@ -85,4 +112,4 @@ function validateName(name, label = "name") {
   return name;
 }
 
-module.exports = { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName };
+module.exports = { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName, redactSecrets };

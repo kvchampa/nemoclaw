@@ -101,13 +101,13 @@ function runAgentInSandbox(message, sessionId) {
     const confPath = `${confDir}/config`;
     require("fs").writeFileSync(confPath, sshConfig, { mode: 0o600 });
 
-    // Pass message and API key via stdin to avoid shell interpolation.
-    // The remote command reads them from environment/stdin rather than
-    // embedding user content in a shell string.
+    // Pass API key via SendEnv + ssh config to avoid exposing it in
+    // process arguments (visible in ps aux / /proc/*/cmdline).
     const safeSessionId = String(sessionId).replace(/[^a-zA-Z0-9-]/g, "");
-    const cmd = `export NVIDIA_API_KEY=${shellQuote(API_KEY)} && nemoclaw-start openclaw agent --agent main --local -m ${shellQuote(message)} --session-id ${shellQuote("tg-" + safeSessionId)}`;
+    const cmd = `nemoclaw-start openclaw agent --agent main --local -m ${shellQuote(message)} --session-id ${shellQuote("tg-" + safeSessionId)}`;
 
-    const proc = spawn("ssh", ["-T", "-F", confPath, `openshell-${SANDBOX}`, cmd], {
+    const proc = spawn("ssh", ["-T", "-F", confPath, "-o", "SendEnv=NVIDIA_API_KEY", `openshell-${SANDBOX}`, cmd], {
+      env: { ...process.env, NVIDIA_API_KEY: API_KEY },
       timeout: 120000,
       stdio: ["ignore", "pipe", "pipe"],
     });
