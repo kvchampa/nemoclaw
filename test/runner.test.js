@@ -127,6 +127,59 @@ describe("shellQuote", () => {
     expect(result.stdout.trim()).toBe(dangerous);
   });
 
+  describe("redactSecrets", () => {
+    it("redacts NVIDIA API key assignments", () => {
+      const { redactSecrets } = require(runnerPath);
+      expect(
+        redactSecrets("NVIDIA_API_KEY=nvapi-abc123xyz"),
+      ).toBe("NVIDIA_API_KEY=<REDACTED>");
+    });
+
+    it("redacts nvapi- prefixed tokens in free text", () => {
+      const { redactSecrets } = require(runnerPath);
+      const input = "using key nvapi-AbCdEfGhIj1234 for auth";
+      expect(redactSecrets(input).includes("nvapi-AbCdEfGhIj1234")).toBe(false);
+      expect(redactSecrets(input).includes("<REDACTED>")).toBe(true);
+    });
+
+    it("redacts GitHub PATs", () => {
+      const { redactSecrets } = require(runnerPath);
+      const ghToken = "ghp_" + "a".repeat(36);
+      expect(redactSecrets(`GITHUB_TOKEN=${ghToken}`)).toBe("GITHUB_TOKEN=<REDACTED>");
+    });
+
+    it("redacts Bearer tokens", () => {
+      const { redactSecrets } = require(runnerPath);
+      expect(
+        redactSecrets("Authorization: Bearer eyJhbGciOiJIUzI1Ni"),
+      ).toBe("Authorization: Bearer <REDACTED>");
+    });
+
+    it("redacts multiple secrets in one string", () => {
+      const { redactSecrets } = require(runnerPath);
+      const input = "NVIDIA_API_KEY=nvapi-secret123456 GITHUB_TOKEN=ghp_" + "b".repeat(36);
+      const result = redactSecrets(input);
+      expect(result.includes("nvapi-secret123456")).toBe(false);
+      expect(result.includes("ghp_")).toBe(false);
+      expect(result.includes("<REDACTED>")).toBe(true);
+    });
+
+    it("returns non-string values unchanged", () => {
+      const { redactSecrets } = require(runnerPath);
+      expect(redactSecrets(null)).toBe(null);
+      expect(redactSecrets(undefined)).toBe(undefined);
+      expect(redactSecrets(42)).toBe(42);
+    });
+
+    it("leaves clean strings unchanged", () => {
+      const { redactSecrets } = require(runnerPath);
+      expect(redactSecrets("bash setup.sh")).toBe("bash setup.sh");
+    });
+  });
+
+  describe("regression guards", () => {
+    it("nemoclaw.js does not use execSync", () => {
+
   it("handles backticks and dollar signs", () => {
     const { shellQuote } = require(runnerPath);
     const payload = "test`whoami`$HOME";
@@ -280,6 +333,8 @@ describe("regression guards", () => {
         expect(line.includes("NVIDIA_API_KEY")).toBe(false);
       }
     });
+
+    it("telegram bridge validates SANDBOX_NAME on startup", () => {
 
     it("walkthrough.sh does not embed NVIDIA_API_KEY in tmux or sandbox commands", () => {
       const fs = require("fs");
