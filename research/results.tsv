@@ -1,0 +1,3 @@
+experiment	track	description	tests_total	tests_pass	tests_fail	notes
+0	baseline	initial state — 194 tests, 188 pass, 6 fail	194	188	6	6 failures in installer preflight + uninstall CLI; 30 open issues; coverage: 93% lines, 98% functions, 87% branches
+1	track1	fix 3 remaining test failures: uninstall symlink rm, installer sudo heuristic	194	194	0	uninstall.sh: check dir writability not symlink target; scripts/install.sh: check npm prefix writability instead of assuming nodesource needs sudo
