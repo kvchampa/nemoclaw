@@ -160,5 +160,31 @@ describe("policies", () => {
         expect(content.includes(expectedBinary)).toBe(true);
       }
     });
+
+    it("every preset has a binaries section (ref: #676)", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        expect(content.includes("binaries:")).toBeTruthy();
+      }
+    });
+
+    it("every preset binaries section includes openclaw", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        expect(content.includes("/usr/local/bin/openclaw")).toBeTruthy();
+      }
+    });
+
+    it("package manager presets include their tool binaries", () => {
+      const npmContent = policies.loadPreset("npm");
+      expect(npmContent.includes("/usr/local/bin/npm")).toBeTruthy();
+      expect(npmContent.includes("/usr/local/bin/node")).toBeTruthy();
+
+      const pypiContent = policies.loadPreset("pypi");
+      expect(pypiContent.includes("/usr/bin/pip")).toBeTruthy();
+
+      const dockerContent = policies.loadPreset("docker");
+      expect(dockerContent.includes("/usr/bin/docker")).toBeTruthy();
+    });
   });
 });

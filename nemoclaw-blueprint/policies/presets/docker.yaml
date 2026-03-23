@@ -42,4 +42,6 @@ network_policies:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
     binaries:
+      - { path: /usr/local/bin/openclaw }
+      - { path: /usr/local/bin/claude }
       - { path: /usr/bin/docker }

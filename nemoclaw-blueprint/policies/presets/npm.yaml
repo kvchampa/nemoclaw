@@ -22,3 +22,4 @@ network_policies:
       - { path: /usr/local/bin/yarn* }
       - { path: /usr/bin/npm* }
       - { path: /usr/bin/node* }
+
