@@ -2003,6 +2003,14 @@ async function setupPolicies(sandboxName) {
 
   const suggestions = ["pypi", "npm"];
 
+  // Auto-detect local inference — sandbox needs host gateway egress
+  const sandbox = registry.getSandbox(sandboxName);
+  const sandboxProvider = sandbox ? sandbox.provider : null;
+  if (sandboxProvider === "ollama-local" || sandboxProvider === "vllm-local") {
+    suggestions.push("local-inference");
+    console.log(`  Auto-detected: ${sandboxProvider} → suggesting local-inference preset`);
+  }
+
   // Auto-detect based on env tokens
   if (getCredential("TELEGRAM_BOT_TOKEN")) {
     suggestions.push("telegram");
