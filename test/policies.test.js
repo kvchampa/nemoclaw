@@ -10,6 +10,7 @@ describe("policies", () => {
     it("returns all 9 presets", () => {
       const presets = policies.listPresets();
       expect(presets.length).toBe(9);
+
     });
 
     it("each preset has name and description", () => {
@@ -23,6 +24,7 @@ describe("policies", () => {
       const names = policies.listPresets().map((p) => p.name).sort();
       const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
       expect(names).toEqual(expected);
+
     });
   });
 
@@ -103,6 +105,7 @@ describe("policies", () => {
       expect(cmd).toBe("openshell policy get --full 'my-assistant' 2>/dev/null");
     });
   });
+
 
   describe("preset YAML schema", () => {
     it("no preset has rules at NetworkPolicyRuleDef level", () => {
