@@ -26,6 +26,7 @@ const {
 const {
   inferContainerRuntime,
   isUnsupportedMacosRuntime,
+  needsIptablesLegacy,
   shouldPatchCoredns,
 } = require("./platform");
 const { prompt, ensureApiKey, getCredential } = require("./credentials");
@@ -358,6 +359,11 @@ async function preflight() {
     console.log(`  ✓ Container runtime: ${runtime}`);
   }
 
+  // iptables compatibility (Jetson devices may lack nf_tables NAT modules)
+  if (needsIptablesLegacy()) {
+    console.log("  ⓘ Jetson detected — iptables-legacy patch will be applied to gateway image");
+  }
+
   // OpenShell CLI
   let openshellInstall = { localBin: null, futureShellPathHint: null };
   if (!isOpenshellInstalled()) {
@@ -462,10 +468,25 @@ async function startGateway(gpu) {
     console.log(`  Using pinned OpenShell gateway image: ${stableGatewayImage}`);
   }
 
-  run(`openshell gateway start ${gwArgs.join(" ")}`, {
-    ignoreError: false,
-    env: gatewayEnv,
-  });
+  if (needsIptablesLegacy()) {
+    // Two-pass start for Jetson: the first attempt pulls the image and
+    // crashes because k3s uses iptables-nft, which needs nf_tables kernel
+    // modules that Jetson doesn't ship. We then patch the image to use
+    // iptables-legacy and start again.
+    console.log("  Pulling gateway image (first start will fail on Jetson)...");
+    run(`openshell gateway start ${gwArgs.join(" ")}`, { ignoreError: true, env: gatewayEnv });
+    sleep(3);
+
+    console.log("  Patching gateway image with iptables-legacy...");
+    run(`bash "${path.join(SCRIPTS, "fix-iptables-jetson.sh")}" nemoclaw`, { ignoreError: false });
+
+    run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
+
+    console.log("  Starting gateway with patched image...");
+    run(`openshell gateway start ${gwArgs.join(" ")}`, { ignoreError: false, env: gatewayEnv });
+  } else {
+    run(`openshell gateway start ${gwArgs.join(" ")}`, { ignoreError: false, env: gatewayEnv });
+  }
 
   // Verify health
   for (let i = 0; i < 5; i++) {
