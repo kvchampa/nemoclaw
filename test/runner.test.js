@@ -201,11 +201,106 @@ describe("runner helpers", () => {
       }
     });
 
-    it("telegram bridge validates SANDBOX_NAME on startup", () => {
-
-      const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
+    it("bridge-core validates SANDBOX_NAME on startup", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "bridge-core.js"), "utf-8");
       expect(src.includes("validateName(SANDBOX")).toBeTruthy();
-      expect(!src.includes("execSync")).toBeTruthy();
+      expect(src.includes("execSync")).toBe(false);
+    });
+
+    it("bridge runner uses bridge-core for sandbox relay", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "bridge.js"), "utf-8");
+      expect(src.includes("require(\"./bridge-core\")")).toBeTruthy();
+      expect(src.includes("runAgentInSandbox")).toBeTruthy();
+    });
+
+    it("each messaging adapter exists and exports a function", () => {
+      const fs = require("fs");
+      const adaptersDir = path.join(__dirname, "..", "scripts", "adapters", "messaging");
+      for (const name of ["telegram", "discord", "slack"]) {
+        const adapterPath = path.join(adaptersDir, `${name}.js`);
+        expect(fs.existsSync(adapterPath)).toBeTruthy();
+        const src = fs.readFileSync(adapterPath, "utf-8");
+        expect(src.includes("module.exports")).toBeTruthy();
+      }
+    });
+
+    it("blueprint.yaml defines bridge configs for all messaging platforms", () => {
+      const fs = require("fs");
+      const yaml = require("js-yaml");
+      const bp = yaml.load(fs.readFileSync(path.join(__dirname, "..", "nemoclaw-blueprint", "blueprint.yaml"), "utf-8"));
+      const bridges = bp.components.bridges;
+      for (const name of ["telegram", "discord", "slack"]) {
+        expect(bridges[name]).toBeTruthy();
+        expect(bridges[name].credential_env).toBeTruthy();
+        expect(bridges[name].session_prefix).toBeTruthy();
+        expect(bridges[name].adapter).toBeTruthy();
+      }
+    });
+
+    it("blueprint bridge configs use credential_env naming consistent with inference profiles", () => {
+      const fs = require("fs");
+      const yaml = require("js-yaml");
+      const bp = yaml.load(fs.readFileSync(path.join(__dirname, "..", "nemoclaw-blueprint", "blueprint.yaml"), "utf-8"));
+      const bridges = bp.components.bridges;
+      for (const [name, config] of Object.entries(bridges)) {
+        expect(config.token_env).toBeFalsy();
+        expect(typeof config.credential_env).toBe("string");
+      }
+    });
+
+    it("slack bridge config lists SLACK_APP_TOKEN in extra_credential_env", () => {
+      const fs = require("fs");
+      const yaml = require("js-yaml");
+      const bp = yaml.load(fs.readFileSync(path.join(__dirname, "..", "nemoclaw-blueprint", "blueprint.yaml"), "utf-8"));
+      const slack = bp.components.bridges.slack;
+      expect(Array.isArray(slack.extra_credential_env)).toBe(true);
+      expect(slack.extra_credential_env.includes("SLACK_APP_TOKEN")).toBe(true);
+    });
+
+    it("telegram-bridge.js backwards-compat wrapper delegates to bridge.js", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
+      expect(src.includes("require(\"./bridge\")")).toBeTruthy();
+      expect(src.includes("telegram")).toBeTruthy();
+    });
+
+    it("bridge.js loads configs from blueprint.yaml, not separate files", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "bridge.js"), "utf-8");
+      expect(src.includes("blueprint.yaml")).toBeTruthy();
+      expect(src.includes("bridges/messaging")).toBe(false);
+    });
+
+    it("bridge.js logs metadata only, never raw message content", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "bridge.js"), "utf-8");
+      // Ensure log lines use length, not content
+      expect(src.includes("inbound (len=")).toBeTruthy();
+      expect(src.includes("response (len=")).toBeTruthy();
+      // Ensure console.log calls never interpolate raw msg.text (length is ok)
+      const logLines = src.split("\n").filter((l) => l.includes("console.log"));
+      for (const line of logLines) {
+        const hasRawText = line.includes("msg.text}") || line.includes("msg.text,") || line.includes("msg.text)");
+        expect(hasRawText).toBe(false);
+      }
+    });
+
+    it("onboard auto-starts bridges when messaging tokens detected", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "bin", "lib", "onboard.js"), "utf-8");
+      expect(src.includes("startMessagingBridges")).toBeTruthy();
+      expect(src.includes("start-services.sh")).toBeTruthy();
+      expect(src.includes("RISKY CHANGE")).toBeTruthy();
+    });
+
+    it("onboard passes all four credential types via getCredential pattern", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "bin", "lib", "onboard.js"), "utf-8");
+      for (const token of ["NVIDIA_API_KEY", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"]) {
+        expect(src.includes(`getCredential("${token}")`)).toBeTruthy();
+      }
     });
   });
 });
