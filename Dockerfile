@@ -23,6 +23,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iptables=1.8.9-2 \
     && rm -rf /var/lib/apt/lists/*
 
+# Remove unnecessary tools that expand the attack surface inside the sandbox.
+# gcc/g++/make enable compiling exploit code and LD_PRELOAD libraries.
+# netcat enables reverse shells and raw TCP exfiltration.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/807
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/808
+RUN apt-get update && apt-get purge -y --auto-remove \
+        gcc g++ cpp make \
+        netcat-openbsd netcat-traditional \
+    && rm -rf /var/lib/apt/lists/* \
+    || true
+
 # gosu for privilege separation (gateway vs sandbox user).
 # Install from GitHub release with checksum verification instead of
 # Debian bookworm's ancient 1.14 (2020). Pinned to 1.19 (2025-09).
