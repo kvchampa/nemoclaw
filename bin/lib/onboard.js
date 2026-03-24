@@ -543,6 +543,22 @@ async function createSandbox(gpu) {
   run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
   run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
 
+  // If CHAT_UI_URL is set, bake it into the Dockerfile copy so the build-time
+  // config generator writes the correct allowedOrigins.  Without this, remote
+  // browsers hit "origin not allowed".
+  // Ref: https://github.com/NVIDIA/NemoClaw/issues/795
+  const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
+  if (chatUiUrl !== 'http://127.0.0.1:18789') {
+    if (/^https?:\/\/[a-zA-Z0-9._:-]+(\/[a-zA-Z0-9._/~%-]*)?$/.test(chatUiUrl)) {
+      const dfPath = path.join(buildCtx, "Dockerfile");
+      let df = fs.readFileSync(dfPath, "utf-8");
+      df = df.replace(/^ARG CHAT_UI_URL=.*/m, `ARG CHAT_UI_URL=${chatUiUrl}`);
+      fs.writeFileSync(dfPath, df);
+    } else {
+      console.log("  Warning: CHAT_UI_URL contains invalid characters — using default (localhost)");
+    }
+  }
+
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
   // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
   const basePolicyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
@@ -554,7 +570,7 @@ async function createSandbox(gpu) {
   // --gpu is intentionally omitted. See comment in startGateway().
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
+  // chatUiUrl was declared above (used for Dockerfile sed).
   const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
   if (process.env.NVIDIA_API_KEY) {
     envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);

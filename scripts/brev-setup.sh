@@ -161,6 +161,21 @@ fi
 # --- 5. Run setup.sh ---
 # Use sg docker to ensure docker group is active (usermod -aG doesn't
 # take effect in the current session without re-login)
+
+# CHAT_UI_URL tells setup.sh which browser origin to allow in the gateway
+# config.  On Brev, the launchable config should set this to the public URL
+# (e.g. https://openclaw0-<id>.brevlab.com).  Without it the dashboard
+# rejects remote browsers with "origin not allowed".
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/795
+if [ -n "${CHAT_UI_URL:-}" ]; then
+  export CHAT_UI_URL
+  info "CHAT_UI_URL=${CHAT_UI_URL}"
+elif [ -z "${DISPLAY:-}" ] && [ ! -e /tmp/.X11-unix ]; then
+  warn "CHAT_UI_URL is not set.  Remote browser access will fail with"
+  warn "'origin not allowed' unless you set CHAT_UI_URL to the public URL"
+  warn "of this instance (e.g. https://openclaw0-<id>.brevlab.com)."
+fi
+
 info "Running setup.sh..."
 export NVIDIA_API_KEY
 exec sg docker -c "bash $SCRIPT_DIR/setup.sh"

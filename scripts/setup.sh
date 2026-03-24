@@ -189,13 +189,34 @@ cp -r "$REPO_DIR/nemoclaw-blueprint" "$BUILD_CTX/nemoclaw-blueprint"
 cp -r "$REPO_DIR/scripts" "$BUILD_CTX/scripts"
 rm -rf "$BUILD_CTX/nemoclaw/node_modules"
 
+# If CHAT_UI_URL is set (e.g. by brev-setup.sh or the user), bake it into the
+# Dockerfile copy so the build-time config generator writes the correct
+# allowedOrigins.  Without this, remote browsers hit "origin not allowed".
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/795
+if [ -n "${CHAT_UI_URL:-}" ]; then
+  if [[ "$CHAT_UI_URL" =~ ^https?://[a-zA-Z0-9._:-]+(/[a-zA-Z0-9._/~%-]*)?$ ]]; then
+    sed -i.bak "s|^ARG CHAT_UI_URL=.*|ARG CHAT_UI_URL=${CHAT_UI_URL}|" "$BUILD_CTX/Dockerfile"
+    rm -f "$BUILD_CTX/Dockerfile.bak"
+    info "CHAT_UI_URL baked into build: ${CHAT_UI_URL}"
+  else
+    warn "CHAT_UI_URL contains invalid characters — using default (localhost)"
+  fi
+fi
+
+# Build the optional runtime env args (CHAT_UI_URL for nemoclaw-start.sh display).
+CHAT_UI_ENV=""
+if [ -n "${CHAT_UI_URL:-}" ]; then
+  CHAT_UI_ENV="CHAT_UI_URL=$CHAT_UI_URL"
+fi
+
 # Capture full output to a temp file so we can filter for display but still
 # detect failures. The raw log is kept on failure for debugging.
 CREATE_LOG=$(mktemp /tmp/nemoclaw-create-XXXXXX.log)
 set +e
+# shellcheck disable=SC2086  # intentional word-split on CHAT_UI_ENV (validated URL, no spaces)
 openshell sandbox create --from "$BUILD_CTX/Dockerfile" --name "$SANDBOX_NAME" \
   --provider nvidia-nim \
-  -- env NVIDIA_API_KEY="$NVIDIA_API_KEY" >"$CREATE_LOG" 2>&1
+  -- env NVIDIA_API_KEY="$NVIDIA_API_KEY" $CHAT_UI_ENV >"$CREATE_LOG" 2>&1
 CREATE_RC=$?
 set -e
 rm -rf "$BUILD_CTX"
