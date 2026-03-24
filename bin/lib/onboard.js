@@ -1508,7 +1508,8 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   // This sets a cgroup pids.max of 512 — enough for normal agent operation
   // but low enough to prevent a prompt-injected fork bomb from exhausting
   // the host.  Ref: https://github.com/NVIDIA/NemoClaw/issues/809
-  const pidsLimit = process.env.NEMOCLAW_PIDS_LIMIT || "512";
+  const rawPidsLimit = process.env.NEMOCLAW_PIDS_LIMIT || "512";
+  const pidsLimit = /^\d+$/.test(rawPidsLimit) ? rawPidsLimit : "512";
   const dockerUpdate = runCapture(
     `docker update --pids-limit ${pidsLimit} "${sandboxName}" 2>&1`,
     { ignoreError: true }
