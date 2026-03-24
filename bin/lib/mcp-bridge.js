@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // MCP bridge: manage stdio-to-HTTP proxies that expose host-side MCP servers
-// to sandboxes via OpenShell port forwarding.
+// to sandboxes via egress policies and host.docker.internal.
 
 const fs = require("fs");
 const path = require("path");
@@ -15,6 +15,7 @@ const MCP_PORT_START = 3100;
 const MCP_PORT_END = 3199;
 const PROXY_SCRIPT = path.join(SCRIPTS, "mcp-proxy.js");
 const VALID_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+const MCP_HOST = "host.docker.internal";
 
 function validateName(name) {
   if (!name || !VALID_NAME_RE.test(name) || name.length > 64) {
@@ -119,6 +120,75 @@ function sshExec(sandboxName, command) {
   }
 }
 
+// ── Egress rule approval ────────────────────────────────────────
+
+function approveEgressRule(sandboxName, port) {
+  const openshell = resolveOpenshell();
+  if (!openshell) return;
+
+  // Trigger a connection attempt so the egress proxy generates a pending rule
+  sshExec(
+    sandboxName,
+    `curl -s --max-time 3 http://${MCP_HOST}:${port} 2>/dev/null || true`,
+  );
+
+  // Poll for the pending rule and approve it (try both node and curl binaries)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const rulesOutput = runCapture(
+      `"${openshell}" rule get "${sandboxName}" 2>/dev/null`,
+      { ignoreError: true },
+    );
+    if (!rulesOutput) continue;
+
+    // Parse chunk IDs for rules matching our host:port that are pending
+    const chunks = rulesOutput.split(/\n\s*Chunk:\s*/);
+    for (const chunk of chunks) {
+      const isPending = /Status:.*pending/i.test(chunk);
+      const matchesHost = chunk.includes(`${MCP_HOST}:${port}`);
+      if (!isPending || !matchesHost) continue;
+
+      const idMatch = chunk.match(
+        /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/,
+      );
+      if (idMatch) {
+        const result = runCapture(
+          `"${openshell}" rule approve --chunk-id "${idMatch[1]}" "${sandboxName}" 2>&1`,
+          { ignoreError: true },
+        );
+        if (result && /approved/i.test(result)) {
+          console.log(`  Egress rule approved for ${MCP_HOST}:${port}.`);
+        }
+      }
+    }
+
+    // Check if any rules were approved
+    const updatedRules = runCapture(
+      `"${openshell}" rule get "${sandboxName}" 2>/dev/null`,
+      { ignoreError: true },
+    );
+    if (
+      updatedRules &&
+      updatedRules.includes(`${MCP_HOST}:${port}`) &&
+      /approved/i.test(updatedRules)
+    ) {
+      return;
+    }
+
+    // Brief pause before retry
+    try {
+      require("child_process").spawnSync("sleep", ["1"]);
+    } catch {}
+  }
+
+  console.log(
+    `  Note: egress rule for ${MCP_HOST}:${port} may need manual approval.`,
+  );
+  console.log(`  Run: openshell rule get "${sandboxName}"`);
+  console.log(
+    `  Then: openshell rule approve --chunk-id <id> "${sandboxName}"`,
+  );
+}
+
 // ── mcporter bootstrap ──────────────────────────────────────────
 
 function ensureMcporter(sandboxName) {
@@ -196,7 +266,7 @@ function add(sandboxName, opts) {
     process.exit(1);
   }
 
-  // Start the proxy
+  // Start the proxy on 127.0.0.1 (not exposed to network)
   console.log(`  Starting MCP proxy for '${name}' on port ${port}...`);
   const dir = pidDir(sandboxName);
   fs.mkdirSync(dir, { recursive: true });
@@ -229,12 +299,9 @@ function add(sandboxName, opts) {
   writePidFile(pidFile(sandboxName, name), proc.pid);
   console.log(`  Proxy started (PID ${proc.pid}).`);
 
-  // Forward port into sandbox
-  console.log(`  Forwarding port ${port} into sandbox...`);
-  run(
-    `openshell forward stop ${port} 2>/dev/null; openshell forward start --background ${port} "${sandboxName}" 2>/dev/null || true`,
-    { ignoreError: true },
-  );
+  // Approve egress rule so sandbox can reach host.docker.internal:<port>
+  console.log(`  Approving egress rule for ${MCP_HOST}:${port}...`);
+  approveEgressRule(sandboxName, port);
 
   // Bootstrap mcporter and register server
   console.log("  Registering server in sandbox...");
@@ -246,15 +313,12 @@ function add(sandboxName, opts) {
     try {
       fs.unlinkSync(pidFile(sandboxName, name));
     } catch {}
-    run(`openshell forward stop ${port} 2>/dev/null || true`, {
-      ignoreError: true,
-    });
     return;
   }
 
   const configOut = sshExec(
     sandboxName,
-    `mcporter config add ${name} --url http://localhost:${port} --scope home 2>&1`,
+    `mcporter config add ${name} --url http://${MCP_HOST}:${port} --scope home 2>&1`,
   );
   if (!configOut || /error/i.test(configOut)) {
     console.error("  mcporter config add failed. Rolling back...");
@@ -265,9 +329,6 @@ function add(sandboxName, opts) {
     try {
       fs.unlinkSync(pidFile(sandboxName, name));
     } catch {}
-    run(`openshell forward stop ${port} 2>/dev/null || true`, {
-      ignoreError: true,
-    });
     return;
   }
 
@@ -319,11 +380,6 @@ function remove(sandboxName, serverName) {
   try {
     fs.unlinkSync(pid);
   } catch {}
-
-  // Stop port forward
-  run(`openshell forward stop ${entry.port} 2>/dev/null || true`, {
-    ignoreError: true,
-  });
 
   // Remove from sandbox mcporter config
   sshExec(sandboxName, `mcporter config remove ${serverName} 2>&1 || true`);
@@ -448,11 +504,8 @@ function restart(sandboxName, serverName) {
     fs.closeSync(logFd);
     writePidFile(pidFile(sandboxName, name), proc.pid);
 
-    // Forward port
-    run(
-      `openshell forward stop ${entry.port} 2>/dev/null; openshell forward start --background ${entry.port} "${sandboxName}" 2>/dev/null || true`,
-      { ignoreError: true },
-    );
+    // Approve egress rule (may already be approved from initial add)
+    approveEgressRule(sandboxName, entry.port);
 
     console.log(`    Started (PID ${proc.pid}, port ${entry.port}).`);
   }
