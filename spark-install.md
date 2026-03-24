@@ -12,20 +12,20 @@
 ## Quick Start
 
 ```bash
-# Install OpenShell:
+# Install OpenShell (may require sudo on Linux):
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
 
 # Clone NemoClaw:
 git clone https://github.com/NVIDIA/NemoClaw.git
 cd NemoClaw
 
-# Spark-specific setup
+# Spark-specific setup (requires sudo for Docker/cgroup config):
 sudo ./scripts/setup-spark.sh
 
-# Install NemoClaw using the NemoClaw/install.sh:
+# Install NemoClaw using the NemoClaw/install.sh (no sudo needed):
 ./install.sh
 
-# Alternatively, you can use the hosted install script:
+# Alternatively, you can use the hosted install script (no sudo needed):
 curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
 ```
 

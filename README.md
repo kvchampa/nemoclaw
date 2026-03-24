@@ -74,6 +74,12 @@ The sandbox image is approximately 2.4 GB compressed. During image push, the Doc
 Download and run the installer script.
 The script installs Node.js if it is not already present, then runs the guided onboard wizard to create a sandbox, configure inference, and apply security policies.
 
+> **ℹ️ Privileges**
+>
+> The installer runs as your normal user — it does **not** require `sudo` or root.
+> It installs Node.js via nvm and NemoClaw via npm, both in user-local directories.
+> If the [prerequisite](#software) software (Docker, OpenShell) is not already installed, install it separately first — those tools may require elevated privileges on Linux.
+
 ```bash
 curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
 ```
