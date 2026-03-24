@@ -666,15 +666,76 @@ export function loadSnapshotManifest(snapshotDir: string): SnapshotManifest {
 export function restoreSnapshotToHost(snapshotDir: string, logger: PluginLogger): boolean {
   const manifest = readSnapshotManifest(snapshotDir);
   const snapshotStateDir = path.join(snapshotDir, "openclaw");
-  if (!existsSync(snapshotStateDir)) {
-    logger.error(`Snapshot directory not found: ${snapshotStateDir}`);
-    return false;
-  }
+  const missingComponents: string[] = [];
 
   // SECURITY (C-4): Validate that write targets are within a trusted root.
   // Use the host's actual home directory — NOT manifest.homeDir which is
   // attacker-controlled data from the snapshot JSON.
   const trustedRoot = resolveHostHome();
+
+  // Validate array schema and constrain paths
+  if (!Array.isArray(manifest.externalRoots)) {
+    logger.error("Snapshot manifest externalRoots is not an array. Refusing to restore.");
+    return false;
+  }
+
+  for (const entry of manifest.externalRoots as unknown[]) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      logger.error("Snapshot manifest contains invalid external root entry. Refusing to restore.");
+      return false;
+    }
+    const root = entry as Record<string, unknown>;
+    if (
+      typeof root["sourcePath"] !== "string" ||
+      typeof root["snapshotRelativePath"] !== "string"
+    ) {
+      logger.error("Snapshot manifest external root has invalid paths. Refusing to restore.");
+      return false;
+    }
+    const sourcePath = root["sourcePath"];
+    const snapshotRelativePath = root["snapshotRelativePath"];
+    if (!isWithinRoot(sourcePath, trustedRoot)) {
+      logger.error(
+        `Snapshot external root sourcePath is outside the trusted host root. Refusing to restore. sourcePath=${sourcePath}, trustedRoot=${trustedRoot}`,
+      );
+      return false;
+    }
+    if (
+      path.isAbsolute(snapshotRelativePath) ||
+      !isWithinRoot(path.join(snapshotDir, snapshotRelativePath), snapshotDir)
+    ) {
+      logger.error(
+        `Snapshot external root snapshotRelativePath escapes snapshot directory. Refusing to restore. snapshotRelativePath=${snapshotRelativePath}`,
+      );
+      return false;
+    }
+  }
+
+  if (!existsSync(snapshotStateDir)) {
+    missingComponents.push(`Primary state: ${snapshotStateDir}`);
+  }
+
+  if (manifest.hasExternalConfig && manifest.configPath) {
+    const configSnapshotPath = path.join(snapshotDir, "config", "openclaw.json");
+    if (!existsSync(configSnapshotPath)) {
+      missingComponents.push(`External config: ${configSnapshotPath}`);
+    }
+  }
+
+  for (const root of manifest.externalRoots) {
+    const rootSnapshotPath = path.join(snapshotDir, root.snapshotRelativePath);
+    if (!existsSync(rootSnapshotPath)) {
+      missingComponents.push(`External ${root.kind} (${root.id}): ${rootSnapshotPath}`);
+    }
+  }
+
+  if (missingComponents.length > 0) {
+    logger.error("Restoration aborted. The following snapshot components are missing:");
+    for (const component of missingComponents) {
+      logger.error(` - ${component}`);
+    }
+    return false;
+  }
 
   // Validate manifest.homeDir itself is within trusted root
   if (typeof manifest.homeDir !== "string" || !isWithinRoot(manifest.homeDir, trustedRoot)) {
@@ -758,7 +819,24 @@ export function restoreSnapshotToHost(snapshotDir: string, logger: PluginLogger)
       logger.info(`Restored external config to ${manifest.configPath}`);
     }
 
-    logger.info("Host OpenClaw state restored.");
+    for (const root of manifest.externalRoots) {
+      const rootSnapshotPath = path.join(snapshotDir, root.snapshotRelativePath);
+      const stagingPath = `${root.sourcePath}.nemoclaw-staging-${String(Date.now())}`;
+
+      mkdirSync(path.dirname(stagingPath), { recursive: true });
+      copyDirectory(rootSnapshotPath, stagingPath);
+
+      if (existsSync(root.sourcePath)) {
+        const rootArchiveName = `${root.sourcePath}.nemoclaw-archived-${String(Date.now())}`;
+        renameSync(root.sourcePath, rootArchiveName);
+        logger.info(`Archived host ${root.kind} directory to ${rootArchiveName}`);
+      }
+
+      renameSync(stagingPath, root.sourcePath);
+      logger.info(`Restored external ${root.kind} to ${root.sourcePath}`);
+    }
+
+    logger.info("Host OpenClaw state and external roots restored.");
     return true;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
