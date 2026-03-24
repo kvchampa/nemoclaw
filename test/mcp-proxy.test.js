@@ -43,28 +43,41 @@ describe("mcp-proxy parseArgs", () => {
 
   it("collects multiple --arg flags", () => {
     const result = parseArgs([
-      "--exe", "npx",
-      "--arg", "@modelcontextprotocol/server-github",
-      "--arg", "--verbose",
+      "--exe",
+      "npx",
+      "--arg",
+      "@modelcontextprotocol/server-github",
+      "--arg",
+      "--verbose",
     ]);
-    expect(result.cmdArgs).toEqual(["@modelcontextprotocol/server-github", "--verbose"]);
+    expect(result.cmdArgs).toEqual([
+      "@modelcontextprotocol/server-github",
+      "--verbose",
+    ]);
   });
 
   it("collects multiple --env flags", () => {
     const result = parseArgs([
-      "--exe", "npx",
-      "--env", "GITHUB_TOKEN",
-      "--env", "SLACK_TOKEN",
+      "--exe",
+      "npx",
+      "--env",
+      "GITHUB_TOKEN",
+      "--env",
+      "SLACK_TOKEN",
     ]);
     expect(result.env).toEqual(["GITHUB_TOKEN", "SLACK_TOKEN"]);
   });
 
   it("parses full command line", () => {
     const result = parseArgs([
-      "--exe", "npx",
-      "--arg", "@modelcontextprotocol/server-github",
-      "--env", "GITHUB_TOKEN",
-      "--port", "3101",
+      "--exe",
+      "npx",
+      "--arg",
+      "@modelcontextprotocol/server-github",
+      "--env",
+      "GITHUB_TOKEN",
+      "--port",
+      "3101",
     ]);
     expect(result.exe).toBe("npx");
     expect(result.cmdArgs).toEqual(["@modelcontextprotocol/server-github"]);
@@ -103,66 +116,106 @@ describe("mcp-proxy executable validation", () => {
 });
 
 // Test the CLI-side arg parser (parseMcpArgs in nemoclaw.js)
+// Format: <name> [-e KEY=VALUE ...] [--port PORT] -- <command> [args...]
 function parseMcpArgs(actionArgs) {
-  const opts = { name: null, command: null, env: [], port: null, server: null };
-  for (let i = 0; i < actionArgs.length; i++) {
-    switch (actionArgs[i]) {
-      case "--name":
-        opts.name = actionArgs[++i];
+  const opts = { name: null, env: {}, port: null, command: null, args: [] };
+  const dashDash = actionArgs.indexOf("--");
+  const flagArgs = dashDash >= 0 ? actionArgs.slice(0, dashDash) : actionArgs;
+  const cmdArgs = dashDash >= 0 ? actionArgs.slice(dashDash + 1) : [];
+
+  let i = 0;
+  if (i < flagArgs.length && !flagArgs[i].startsWith("-")) {
+    opts.name = flagArgs[i];
+    i++;
+  }
+  for (; i < flagArgs.length; i++) {
+    switch (flagArgs[i]) {
+      case "-e":
+      case "--env": {
+        const val = flagArgs[++i];
+        if (val) {
+          const eqIdx = val.indexOf("=");
+          if (eqIdx > 0) {
+            opts.env[val.slice(0, eqIdx)] = val.slice(eqIdx + 1);
+          } else {
+            opts.env[val] = "";
+          }
+        }
         break;
-      case "--command":
-        opts.command = actionArgs[++i];
-        break;
-      case "--env":
-        opts.env.push(actionArgs[++i]);
-        break;
+      }
       case "--port":
-        opts.port = parseInt(actionArgs[++i], 10);
+        opts.port = parseInt(flagArgs[++i], 10);
         break;
       default:
-        if (!opts.server && !actionArgs[i].startsWith("-"))
-          opts.server = actionArgs[i];
         break;
     }
+  }
+  if (cmdArgs.length > 0) {
+    opts.command = cmdArgs[0];
+    opts.args = cmdArgs.slice(1);
   }
   return opts;
 }
 
 describe("CLI parseMcpArgs", () => {
-  it("parses add arguments", () => {
+  it("parses add with positional name, -e KEY=VALUE, and -- command", () => {
     const result = parseMcpArgs([
-      "--name", "github",
-      "--command", "npx @modelcontextprotocol/server-github",
-      "--env", "GITHUB_TOKEN",
+      "github",
+      "-e",
+      "GITHUB_TOKEN=ghp_xxx",
+      "--",
+      "npx",
+      "-y",
+      "@modelcontextprotocol/server-github",
     ]);
     expect(result.name).toBe("github");
-    expect(result.command).toBe("npx @modelcontextprotocol/server-github");
-    expect(result.env).toEqual(["GITHUB_TOKEN"]);
+    expect(result.env).toEqual({ GITHUB_TOKEN: "ghp_xxx" });
+    expect(result.command).toBe("npx");
+    expect(result.args).toEqual(["-y", "@modelcontextprotocol/server-github"]);
   });
 
   it("parses optional --port", () => {
     const result = parseMcpArgs([
-      "--name", "github",
-      "--command", "npx server",
-      "--port", "3105",
+      "github",
+      "--port",
+      "3105",
+      "--",
+      "npx",
+      "server",
     ]);
     expect(result.port).toBe(3105);
+    expect(result.command).toBe("npx");
+    expect(result.args).toEqual(["server"]);
   });
 
-  it("parses positional server name for remove", () => {
+  it("parses positional name for remove/restart", () => {
     const result = parseMcpArgs(["github"]);
-    expect(result.server).toBe("github");
+    expect(result.name).toBe("github");
+    expect(result.command).toBeNull();
   });
 
-  it("collects multiple --env flags", () => {
+  it("collects multiple -e flags with values", () => {
     const result = parseMcpArgs([
-      "--name", "multi",
-      "--command", "cmd",
-      "--env", "TOKEN_A",
-      "--env", "TOKEN_B",
-      "--env", "TOKEN_C",
+      "multi",
+      "-e",
+      "TOKEN_A=aaa",
+      "-e",
+      "TOKEN_B=bbb",
+      "-e",
+      "TOKEN_C=ccc",
+      "--",
+      "cmd",
     ]);
-    expect(result.env).toEqual(["TOKEN_A", "TOKEN_B", "TOKEN_C"]);
+    expect(result.env).toEqual({
+      TOKEN_A: "aaa",
+      TOKEN_B: "bbb",
+      TOKEN_C: "ccc",
+    });
+  });
+
+  it("handles -e with name only (no value)", () => {
+    const result = parseMcpArgs(["foo", "-e", "MY_VAR", "--", "cmd"]);
+    expect(result.env).toEqual({ MY_VAR: "" });
   });
 
   it("returns nulls for empty args", () => {
@@ -170,7 +223,18 @@ describe("CLI parseMcpArgs", () => {
     expect(result.name).toBeNull();
     expect(result.command).toBeNull();
     expect(result.port).toBeNull();
-    expect(result.server).toBeNull();
-    expect(result.env).toEqual([]);
+    expect(result.env).toEqual({});
+    expect(result.args).toEqual([]);
+  });
+
+  it("handles env values containing equals signs", () => {
+    const result = parseMcpArgs([
+      "foo",
+      "-e",
+      "URL=https://example.com?a=1&b=2",
+      "--",
+      "cmd",
+    ]);
+    expect(result.env).toEqual({ URL: "https://example.com?a=1&b=2" });
   });
 });

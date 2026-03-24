@@ -478,28 +478,55 @@ async function sandboxDestroy(sandboxName, args = []) {
 
 // ── MCP bridge ──────────────────────────────────────────────────
 
+// Parse: mcp add <name> [-e KEY=VALUE ...] [--port PORT] -- <command> [args...]
+// Parse: mcp remove <name>
+// Parse: mcp restart [<name>]
 function parseMcpArgs(actionArgs) {
-  const opts = { name: null, command: null, env: [], port: null, server: null };
-  for (let i = 0; i < actionArgs.length; i++) {
-    switch (actionArgs[i]) {
-      case "--name":
-        opts.name = actionArgs[++i];
+  const opts = { name: null, env: {}, port: null, command: null, args: [] };
+
+  // Split on "--" to separate flags from command
+  const dashDash = actionArgs.indexOf("--");
+  const flagArgs = dashDash >= 0 ? actionArgs.slice(0, dashDash) : actionArgs;
+  const cmdArgs = dashDash >= 0 ? actionArgs.slice(dashDash + 1) : [];
+
+  // First positional arg is the name
+  let i = 0;
+  if (i < flagArgs.length && !flagArgs[i].startsWith("-")) {
+    opts.name = flagArgs[i];
+    i++;
+  }
+
+  // Parse flags
+  for (; i < flagArgs.length; i++) {
+    switch (flagArgs[i]) {
+      case "-e":
+      case "--env": {
+        const val = flagArgs[++i];
+        if (val) {
+          const eqIdx = val.indexOf("=");
+          if (eqIdx > 0) {
+            opts.env[val.slice(0, eqIdx)] = val.slice(eqIdx + 1);
+          } else {
+            // Name only — read from host environment
+            opts.env[val] = process.env[val] || "";
+          }
+        }
         break;
-      case "--command":
-        opts.command = actionArgs[++i];
-        break;
-      case "--env":
-        opts.env.push(actionArgs[++i]);
-        break;
+      }
       case "--port":
-        opts.port = parseInt(actionArgs[++i], 10);
+        opts.port = parseInt(flagArgs[++i], 10);
         break;
       default:
-        if (!opts.server && !actionArgs[i].startsWith("-"))
-          opts.server = actionArgs[i];
         break;
     }
   }
+
+  // Command after "--"
+  if (cmdArgs.length > 0) {
+    opts.command = cmdArgs[0];
+    opts.args = cmdArgs.slice(1);
+  }
+
   return opts;
 }
 
@@ -513,13 +540,13 @@ async function sandboxMcp(sandboxName, actionArgs) {
       mcpBridge.add(sandboxName, opts);
       break;
     case "remove":
-      mcpBridge.remove(sandboxName, opts.server || subArgs[0]);
+      mcpBridge.remove(sandboxName, opts.name || subArgs[0]);
       break;
     case "list":
       mcpBridge.list(sandboxName);
       break;
     case "restart":
-      mcpBridge.restart(sandboxName, opts.server || subArgs[0]);
+      mcpBridge.restart(sandboxName, opts.name || subArgs[0]);
       break;
     default:
       console.error(
@@ -528,11 +555,18 @@ async function sandboxMcp(sandboxName, actionArgs) {
       console.error("");
       console.error("  Commands:");
       console.error(
-        "    add      --name <id> --command <cmd> [--env VAR ...] [--port PORT]",
+        "    add      <server> [-e KEY=VALUE ...] [--port PORT] -- <command> [args...]",
       );
-      console.error("    remove   <name>");
+      console.error("    remove   <server>");
       console.error("    list");
-      console.error("    restart  [<name>]");
+      console.error("    restart  [<server>]");
+      console.error("");
+      console.error("  <server> is the MCP server name (e.g., github, slack).");
+      console.error("");
+      console.error("  Example:");
+      console.error(
+        '    nemoclaw my-sb mcp add github -e GITHUB_TOKEN="$GITHUB_TOKEN" -- npx -y @modelcontextprotocol/server-github',
+      );
       process.exit(1);
   }
 }

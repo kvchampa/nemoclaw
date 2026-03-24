@@ -239,16 +239,24 @@ function ensureMcporter(sandboxName) {
 
 function add(sandboxName, opts) {
   validateName(sandboxName);
-  const { name, command, env = [], port: requestedPort } = opts;
+  const {
+    name,
+    command,
+    args: cmdArgs = [],
+    env = {},
+    port: requestedPort,
+  } = opts;
 
   if (!name) {
-    console.error("  --name is required.");
+    console.error("  Name is required: nemoclaw <sb> mcp add <name> ...");
     process.exit(1);
   }
   validateName(name);
 
   if (!command) {
-    console.error("  --command is required.");
+    console.error(
+      "  Command is required after '--': nemoclaw <sb> mcp add <name> -- <command> [args...]",
+    );
     process.exit(1);
   }
 
@@ -268,13 +276,10 @@ function add(sandboxName, opts) {
     process.exit(1);
   }
 
-  // Validate env var names and values
-  for (const v of env) {
+  // Validate env var names
+  const envNames = Object.keys(env);
+  for (const v of envNames) {
     validateEnvName(v);
-    if (!process.env[v]) {
-      console.error(`  Environment variable ${v} is not set.`);
-      process.exit(1);
-    }
   }
 
   // Assign port
@@ -292,21 +297,18 @@ function add(sandboxName, opts) {
   const dir = pidDir(sandboxName);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  // Split command into exe + args at add-time so the stored values are pre-split
-  const cmdParts = command.split(/\s+/);
-  const exe = cmdParts[0];
-  const cmdArgs = cmdParts.slice(1);
-  const proxyArgs = ["--exe", exe, "--port", String(port)];
+  const proxyArgs = ["--exe", command, "--port", String(port)];
   for (const arg of cmdArgs) {
     proxyArgs.push("--arg", arg);
   }
-  for (const v of env) {
+  for (const v of envNames) {
     proxyArgs.push("--env", v);
   }
 
   // Build minimal env for the proxy — only PATH, HOME, and named vars
+  // Values come from the -e KEY=VALUE pairs, not from the host environment
   const proxyEnv = { PATH: process.env.PATH, HOME: process.env.HOME };
-  for (const v of env) proxyEnv[v] = process.env[v];
+  for (const [k, v] of Object.entries(env)) proxyEnv[k] = v;
 
   const logPath = path.join(dir, `mcp-${name}.log`);
   const logFd = fs.openSync(logPath, "a");
@@ -355,12 +357,10 @@ function add(sandboxName, opts) {
     return;
   }
 
-  // Save to registry
+  // Save to registry — env values stored inline (mode 600 file)
   const mcp = sandbox.mcp || {};
   mcp[name] = {
-    type: "stdio",
     command,
-    exe,
     args: cmdArgs,
     env,
     port,
@@ -437,11 +437,13 @@ function list(sandboxName) {
     const running = isRunning(pid);
     const marker = running ? "\x1b[32m●\x1b[0m" : "\x1b[31m○\x1b[0m";
     const status = running ? "" : "  (stopped)";
+    const envKeys = Array.isArray(entry.env)
+      ? entry.env
+      : Object.keys(entry.env || {});
     const envStr =
-      entry.env && entry.env.length > 0
-        ? `env: ${entry.env.join(", ")}`
-        : "env: (none)";
-    const source = entry.type === "http" ? entry.url : entry.command;
+      envKeys.length > 0 ? `env: ${envKeys.join(", ")}` : "env: (none)";
+    const cmdDisplay = [entry.command, ...(entry.args || [])].join(" ");
+    const source = cmdDisplay;
     console.log(
       `    ${marker} ${name.padEnd(14)} :${entry.port}  ${source.slice(0, 45).padEnd(45)}  ${envStr}${status}`,
     );
@@ -484,37 +486,33 @@ function restart(sandboxName, serverName) {
       } catch {}
     }
 
-    // Validate env vars
-    let envOk = true;
-    for (const v of entry.env || []) {
-      if (!process.env[v]) {
-        console.error(
-          `    Environment variable ${v} is not set. Skipping '${name}'.`,
-        );
-        envOk = false;
-        break;
-      }
-    }
-    if (!envOk) continue;
+    // Env values are stored inline in the registry — no host env vars needed
+    const entryEnv = entry.env || {};
+    const envNames = Array.isArray(entryEnv) ? entryEnv : Object.keys(entryEnv);
 
     // Start proxy
     const dir = pidDir(sandboxName);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-    // Use stored exe/args if available, fall back to splitting command for older entries
-    const exe = entry.exe || entry.command.split(/\s+/)[0];
-    const entryArgs = entry.args || entry.command.split(/\s+/).slice(1);
+    const exe = entry.command;
+    const entryArgs = entry.args || [];
     const proxyArgs = ["--exe", exe, "--port", String(entry.port)];
     for (const arg of entryArgs) {
       proxyArgs.push("--arg", arg);
     }
-    for (const v of entry.env || []) {
+    for (const v of envNames) {
       proxyArgs.push("--env", v);
     }
 
-    // Build minimal env for the proxy
+    // Build minimal env for the proxy — values from stored config
     const proxyEnv = { PATH: process.env.PATH, HOME: process.env.HOME };
-    for (const v of entry.env || []) proxyEnv[v] = process.env[v];
+    if (Array.isArray(entryEnv)) {
+      // Legacy format: env is ["VAR"] — read from host environment
+      for (const v of entryEnv) proxyEnv[v] = process.env[v] || "";
+    } else {
+      // New format: env is { "VAR": "value" } — read from stored config
+      for (const [k, v] of Object.entries(entryEnv)) proxyEnv[k] = v;
+    }
 
     const logPath = path.join(dir, `mcp-${name}.log`);
     const logFd = fs.openSync(logPath, "a");
