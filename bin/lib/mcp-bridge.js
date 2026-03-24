@@ -181,17 +181,20 @@ function approveEgressRule(sandboxName, port) {
       }
     }
 
-    // Check if any rules were approved
+    // Check if any rules for our exact endpoint were approved
     const updatedRules = runCapture(
       `"${openshell}" rule get "${sandboxName}" 2>/dev/null`,
       { ignoreError: true },
     );
-    if (
-      updatedRules &&
-      updatedRules.includes(`${MCP_HOST}:${port}`) &&
-      /approved/i.test(updatedRules)
-    ) {
-      return;
+    if (updatedRules) {
+      const updatedChunks = updatedRules.split(/\n\s*Chunk:\s*/);
+      const approved = updatedChunks.some((c) => {
+        const ep = c.match(/Endpoints:\s*(.+)/);
+        return (
+          ep && ep[1].trim() === exactEndpoint && /Status:.*approved/i.test(c)
+        );
+      });
+      if (approved) return;
     }
 
     // Brief pause before retry
