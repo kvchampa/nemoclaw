@@ -42,6 +42,10 @@ landlock:
 process:
   run_as_user: sandbox
   run_as_group: sandbox
+  # NOTE: Process count limits (fork bomb protection) must be enforced
+  # at the container runtime level. OpenShell does not currently expose
+  # a pids-limit field in the sandbox policy.
+  # Ref: https://github.com/NVIDIA/NemoClaw/issues/809
 
 network_policies:
   claude_code:
