@@ -1,20 +1,37 @@
+---
+title:
+  page: "Sandbox Image Hardening — Attack Surface Reduction"
+  nav: "Sandbox Hardening"
+description: "NemoClaw hardens the sandbox image by removing unnecessary tools that expand the attack surface."
+keywords: ["security", "sandbox", "hardening", "gcc", "netcat", "attack surface"]
+topics: ["security"]
+tags: ["hardening", "dockerfile", "defence-in-depth"]
+content:
+  type: reference
+  difficulty: technical_beginner
+  audience: ["operator", "contributor"]
+status: published
+---
+
+<!--
+  SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 # Sandbox Image Hardening
 
-## Attack Surface Reduction
+NemoClaw hardens the sandbox image by stripping unnecessary tools that a compromised or prompt-injected agent could use.
 
-The NemoClaw sandbox image is hardened by removing unnecessary tools that could
-be used by a compromised or prompt-injected agent.
-
-### Removed Packages
+## Removed Packages
 
 | Package | Risk | Reference |
 |---------|------|-----------|
 | gcc, g++, cpp, make | Compile exploit code, LD_PRELOAD injection | [#807](https://github.com/NVIDIA/NemoClaw/issues/807) |
 | netcat-openbsd, netcat-traditional | Reverse shells, raw TCP exfiltration | [#808](https://github.com/NVIDIA/NemoClaw/issues/808) |
 
-### Defence Layers
+## Defence Layers
 
-```mermaid
+```{mermaid}
 graph TD
     subgraph "Sandbox Image Hardening"
         A[Base Image] -->|apt-get purge| B[No gcc/g++/make]
@@ -38,6 +55,5 @@ graph TD
     L --> N
 ```
 
-Even if one layer is bypassed, the others provide protection. Removing tools
-from the image means an attacker who escapes the proxy still cannot compile
-custom tooling or open raw TCP connections.
+Even if one layer is bypassed, the others provide protection.
+Removing tools from the image means an attacker who escapes the proxy still cannot compile custom tooling or open raw TCP connections.
