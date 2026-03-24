@@ -5,6 +5,7 @@
 
 const { run, runCapture, shellQuote } = require("./runner");
 const nimImages = require("./nim-images.json");
+const { VLLM_PORT } = require("./ports");
 
 function containerName(sandboxName) {
   return `nemoclaw-nim-${sandboxName}`;
@@ -125,7 +126,7 @@ function pullNimImage(model) {
   return image;
 }
 
-function startNimContainer(sandboxName, model, port = 8000) {
+function startNimContainer(sandboxName, model, port = VLLM_PORT) {
   const name = containerName(sandboxName);
   const image = getImageForModel(model);
   if (!image) {
@@ -144,7 +145,7 @@ function startNimContainer(sandboxName, model, port = 8000) {
   return name;
 }
 
-function waitForNimHealth(port = 8000, timeout = 300) {
+function waitForNimHealth(port = VLLM_PORT, timeout = 300) {
   const start = Date.now();
   const interval = 5000;
   const safePort = Number(port);
@@ -186,7 +187,7 @@ function nimStatus(sandboxName) {
 
     let healthy = false;
     if (state === "running") {
-      const health = runCapture(`curl -sf http://localhost:8000/v1/models 2>/dev/null`, {
+      const health = runCapture(`curl -sf http://localhost:${VLLM_PORT}/v1/models 2>/dev/null`, {
         ignoreError: true,
       });
       healthy = !!health;

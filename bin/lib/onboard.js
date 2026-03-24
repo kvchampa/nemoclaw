@@ -33,6 +33,7 @@ const registry = require("./registry");
 const nim = require("./nim");
 const policies = require("./policies");
 const { checkPortAvailable } = require("./preflight");
+const { DASHBOARD_PORT, GATEWAY_PORT, VLLM_PORT, OLLAMA_PORT } = require("./ports");
 const EXPERIMENTAL = process.env.NEMOCLAW_EXPERIMENTAL === "1";
 const USE_COLOR = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const DIM = USE_COLOR ? "\x1b[2m" : "";
@@ -383,15 +384,15 @@ async function preflight() {
   const gwInfo = runCapture("openshell gateway info -g nemoclaw 2>/dev/null", { ignoreError: true });
   if (hasStaleGateway(gwInfo)) {
     console.log("  Cleaning up previous NemoClaw session...");
-    run("openshell forward stop 18789 2>/dev/null || true", { ignoreError: true });
+    run(`openshell forward stop ${DASHBOARD_PORT} 2>/dev/null || true`, { ignoreError: true });
     run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — gateway (8080) and dashboard (18789)
+  // Required ports — gateway and dashboard
   const requiredPorts = [
-    { port: 8080, label: "OpenShell gateway" },
-    { port: 18789, label: "NemoClaw dashboard" },
+    { port: GATEWAY_PORT, label: "OpenShell gateway" },
+    { port: DASHBOARD_PORT, label: "NemoClaw dashboard" },
   ];
   for (const { port, label } of requiredPorts) {
     const portCheck = await checkPortAvailable(port);
@@ -445,7 +446,7 @@ async function startGateway(gpu) {
   // Destroy old gateway
   run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
 
-  const gwArgs = ["--name", "nemoclaw"];
+  const gwArgs = ["--name", "nemoclaw", "--port", String(GATEWAY_PORT)];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
   // routed through a host-side provider (Ollama, vLLM, or cloud API) — the
   // sandbox itself does not need direct GPU access. Passing --gpu causes
@@ -554,7 +555,7 @@ async function createSandbox(gpu) {
   // --gpu is intentionally omitted. See comment in startGateway().
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
+  const chatUiUrl = process.env.CHAT_UI_URL || `http://127.0.0.1:${DASHBOARD_PORT}`;
   const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
   if (process.env.NVIDIA_API_KEY) {
     envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);
@@ -622,12 +623,12 @@ async function createSandbox(gpu) {
     process.exit(1);
   }
 
-  // Release any stale forward on port 18789 before claiming it for the new sandbox.
+  // Release any stale forward on the dashboard port before claiming it for the new sandbox.
   // A previous onboard run may have left the port forwarded to a different sandbox,
   // which would silently prevent the new sandbox's dashboard from being reachable.
-  run(`openshell forward stop 18789 2>/dev/null || true`, { ignoreError: true });
+  run(`openshell forward stop ${DASHBOARD_PORT} 2>/dev/null || true`, { ignoreError: true });
   // Forward dashboard port to the new sandbox
-  run(`openshell forward start --background 18789 "${sandboxName}"`, { ignoreError: true });
+  run(`openshell forward start --background ${DASHBOARD_PORT} "${sandboxName}"`, { ignoreError: true });
 
   // Register only after confirmed ready — prevents phantom entries
   registry.registerSandbox({
@@ -650,8 +651,8 @@ async function setupNim(sandboxName, gpu) {
 
   // Detect local inference options
   const hasOllama = !!runCapture("command -v ollama", { ignoreError: true });
-  const ollamaRunning = !!runCapture("curl -sf http://localhost:11434/api/tags 2>/dev/null", { ignoreError: true });
-  const vllmRunning = !!runCapture("curl -sf http://localhost:8000/v1/models 2>/dev/null", { ignoreError: true });
+  const ollamaRunning = !!runCapture(`curl -sf http://localhost:${OLLAMA_PORT}/api/tags 2>/dev/null`, { ignoreError: true });
+  const vllmRunning = !!runCapture(`curl -sf http://localhost:${VLLM_PORT}/v1/models 2>/dev/null`, { ignoreError: true });
   const requestedProvider = isNonInteractive() ? getNonInteractiveProvider() : null;
   const requestedModel = isNonInteractive() ? getNonInteractiveModel(requestedProvider || "cloud") : null;
   // Build options list — only show local options with NEMOCLAW_EXPERIMENTAL=1
@@ -669,14 +670,14 @@ async function setupNim(sandboxName, gpu) {
     options.push({
       key: "ollama",
       label:
-        `Local Ollama (localhost:11434)${ollamaRunning ? " — running" : ""}` +
+        `Local Ollama (localhost:${OLLAMA_PORT})${ollamaRunning ? " — running" : ""}` +
         (ollamaRunning ? " (suggested)" : ""),
     });
   }
   if (EXPERIMENTAL && vllmRunning) {
     options.push({
       key: "vllm",
-      label: "Existing vLLM instance (localhost:8000) — running [experimental] (suggested)",
+      label: `Existing vLLM instance (localhost:${VLLM_PORT}) — running [experimental] (suggested)`,
     });
   }
 
@@ -769,10 +770,10 @@ async function setupNim(sandboxName, gpu) {
     } else if (selected.key === "ollama") {
       if (!ollamaRunning) {
         console.log("  Starting Ollama...");
-        run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+        run(`OLLAMA_HOST=0.0.0.0:${OLLAMA_PORT} ollama serve > /dev/null 2>&1 &`, { ignoreError: true });
         sleep(2);
       }
-      console.log("  ✓ Using Ollama on localhost:11434");
+      console.log(`  ✓ Using Ollama on localhost:${OLLAMA_PORT}`);
       provider = "ollama-local";
       if (isNonInteractive()) {
         model = requestedModel || getDefaultOllamaModel(runCapture);
@@ -783,9 +784,9 @@ async function setupNim(sandboxName, gpu) {
       console.log("  Installing Ollama via Homebrew...");
       run("brew install ollama", { ignoreError: true });
       console.log("  Starting Ollama...");
-      run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+      run(`OLLAMA_HOST=0.0.0.0:${OLLAMA_PORT} ollama serve > /dev/null 2>&1 &`, { ignoreError: true });
         sleep(2);
-      console.log("  ✓ Using Ollama on localhost:11434");
+      console.log(`  ✓ Using Ollama on localhost:${OLLAMA_PORT}`);
       provider = "ollama-local";
       if (isNonInteractive()) {
         model = requestedModel || getDefaultOllamaModel(runCapture);
@@ -793,7 +794,7 @@ async function setupNim(sandboxName, gpu) {
         model = await promptOllamaModel();
       }
     } else if (selected.key === "vllm") {
-      console.log("  ✓ Using existing vLLM on localhost:8000");
+      console.log(`  ✓ Using existing vLLM on localhost:${VLLM_PORT}`);
       provider = "vllm-local";
       // Query vLLM for the actual model ID
       const vllmModelsRaw = runCapture("curl -sf http://localhost:8000/v1/models 2>/dev/null", { ignoreError: true });
@@ -1061,7 +1062,6 @@ function printDashboard(sandboxName, model, provider) {
 
   console.log("");
   console.log(`  ${"─".repeat(50)}`);
-  // console.log(`  Dashboard    http://localhost:18789/`);
   console.log(`  Sandbox      ${sandboxName} (Landlock + seccomp + netns)`);
   console.log(`  Model        ${model} (${providerLabel})`);
   console.log(`  NIM          ${nimLabel}`);

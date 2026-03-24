@@ -30,6 +30,7 @@ const {
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
+const { DASHBOARD_PORT } = require("./lib/ports");
 
 // ── Global commands ──────────────────────────────────────────────
 
@@ -300,7 +301,7 @@ function listSandboxes() {
 function sandboxConnect(sandboxName) {
   const qn = shellQuote(sandboxName);
   // Ensure port forward is alive before connecting
-  run(`openshell forward start --background 18789 ${qn} 2>/dev/null || true`, { ignoreError: true });
+  run(`openshell forward start --background ${DASHBOARD_PORT} ${qn} 2>/dev/null || true`, { ignoreError: true });
   runInteractive(`openshell sandbox connect ${qn}`);
 }
 
