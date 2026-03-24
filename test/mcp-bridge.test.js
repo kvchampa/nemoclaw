@@ -36,11 +36,25 @@ describe("mcp-bridge port management", () => {
   });
 
   it("getAllUsedPorts returns ports from sandboxes with mcp entries", () => {
-    registry.registerSandbox({ name: "test-sb", model: "test", provider: "nvidia-nim" });
+    registry.registerSandbox({
+      name: "test-sb",
+      model: "test",
+      provider: "nvidia-nim",
+    });
     registry.updateSandbox("test-sb", {
       mcp: {
-        github: { type: "stdio", command: "npx server-github", port: 3101, env: [] },
-        slack: { type: "stdio", command: "npx server-slack", port: 3102, env: [] },
+        github: {
+          type: "stdio",
+          command: "npx server-github",
+          port: 3101,
+          env: [],
+        },
+        slack: {
+          type: "stdio",
+          command: "npx server-slack",
+          port: 3102,
+          env: [],
+        },
       },
     });
     const data = registry.load();
@@ -59,7 +73,11 @@ describe("mcp-bridge port management", () => {
 
 describe("mcp-bridge registry integration", () => {
   it("stores mcp config in sandbox registry", () => {
-    registry.registerSandbox({ name: "mcp-test", model: "test", provider: "nvidia-nim" });
+    registry.registerSandbox({
+      name: "mcp-test",
+      model: "test",
+      provider: "nvidia-nim",
+    });
     const sandbox = registry.getSandbox("mcp-test");
     const mcp = sandbox.mcp || {};
     mcp["github"] = {
@@ -82,7 +100,11 @@ describe("mcp-bridge registry integration", () => {
   });
 
   it("removes mcp entry from registry", () => {
-    registry.registerSandbox({ name: "mcp-rm", model: "test", provider: "nvidia-nim" });
+    registry.registerSandbox({
+      name: "mcp-rm",
+      model: "test",
+      provider: "nvidia-nim",
+    });
     registry.updateSandbox("mcp-rm", {
       mcp: {
         github: { type: "stdio", command: "test", port: 3101, env: [] },
@@ -100,7 +122,11 @@ describe("mcp-bridge registry integration", () => {
   });
 
   it("handles sandbox with no mcp field", () => {
-    registry.registerSandbox({ name: "no-mcp", model: "test", provider: "nvidia-nim" });
+    registry.registerSandbox({
+      name: "no-mcp",
+      model: "test",
+      provider: "nvidia-nim",
+    });
     const sandbox = registry.getSandbox("no-mcp");
     expect(sandbox.mcp).toBeUndefined();
   });
@@ -124,6 +150,35 @@ describe("mcp-bridge name validation", () => {
     expect(VALID_NAME_RE.test("a/b")).toBe(false);
     expect(VALID_NAME_RE.test("a;b")).toBe(false);
     expect(VALID_NAME_RE.test("../etc")).toBe(false);
+  });
+});
+
+describe("mcp-bridge env var name validation", () => {
+  const VALID_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  it("accepts valid env var names", () => {
+    expect(VALID_ENV_RE.test("GITHUB_TOKEN")).toBe(true);
+    expect(VALID_ENV_RE.test("_PRIVATE")).toBe(true);
+    expect(VALID_ENV_RE.test("A")).toBe(true);
+    expect(VALID_ENV_RE.test("my_var_123")).toBe(true);
+  });
+
+  it("rejects env names with shell metacharacters", () => {
+    expect(VALID_ENV_RE.test("VAR=value")).toBe(false);
+    expect(VALID_ENV_RE.test("VAR;rm -rf")).toBe(false);
+    expect(VALID_ENV_RE.test("VAR|cat")).toBe(false);
+    expect(VALID_ENV_RE.test("$(cmd)")).toBe(false);
+    expect(VALID_ENV_RE.test("`cmd`")).toBe(false);
+    expect(VALID_ENV_RE.test("VAR NAME")).toBe(false);
+  });
+
+  it("rejects env names starting with digits", () => {
+    expect(VALID_ENV_RE.test("1VAR")).toBe(false);
+    expect(VALID_ENV_RE.test("123")).toBe(false);
+  });
+
+  it("rejects empty names", () => {
+    expect(VALID_ENV_RE.test("")).toBe(false);
   });
 });
 

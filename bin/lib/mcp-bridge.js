@@ -15,6 +15,7 @@ const MCP_PORT_START = 3100;
 const MCP_PORT_END = 3199;
 const PROXY_SCRIPT = path.join(SCRIPTS, "mcp-proxy.js");
 const VALID_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
+const VALID_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MCP_HOST = "host.docker.internal";
 
 function validateName(name) {
@@ -22,6 +23,18 @@ function validateName(name) {
     console.error(`  Invalid server name '${String(name).slice(0, 64)}'.`);
     console.error(
       "  Names must start with a letter and contain only letters, digits, hyphens, and underscores.",
+    );
+    process.exit(1);
+  }
+}
+
+function validateEnvName(name) {
+  if (!name || !VALID_ENV_RE.test(name) || name.length > 128) {
+    console.error(
+      `  Invalid environment variable name '${String(name).slice(0, 128)}'.`,
+    );
+    console.error(
+      "  Names must match [A-Za-z_][A-Za-z0-9_]* (e.g., GITHUB_TOKEN).",
     );
     process.exit(1);
   }
@@ -106,8 +119,10 @@ function sshExec(sandboxName, command) {
   const sshConfig = runCapture(
     `"${openshell}" sandbox ssh-config "${sandboxName}"`,
   );
-  const confPath = `/tmp/nemoclaw-mcp-ssh-${sandboxName}.conf`;
-  fs.writeFileSync(confPath, sshConfig);
+  const os = require("os");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-ssh-"));
+  const confPath = path.join(tmpDir, "config");
+  fs.writeFileSync(confPath, sshConfig, { mode: 0o600 });
   try {
     return runCapture(
       `ssh -T -F "${confPath}" -o ConnectTimeout=10 "openshell-${sandboxName}" '${command.replace(/'/g, "'\\''")}'`,
@@ -116,6 +131,7 @@ function sshExec(sandboxName, command) {
   } finally {
     try {
       fs.unlinkSync(confPath);
+      fs.rmdirSync(tmpDir);
     } catch {}
   }
 }
@@ -140,11 +156,15 @@ function approveEgressRule(sandboxName, port) {
     );
     if (!rulesOutput) continue;
 
-    // Parse chunk IDs for rules matching our host:port that are pending
+    // Parse chunk IDs for rules matching our exact host:port that are pending.
+    // Use Endpoints field for precise matching to avoid approving unrelated rules.
+    const exactEndpoint = `${MCP_HOST}:${port}`;
     const chunks = rulesOutput.split(/\n\s*Chunk:\s*/);
     for (const chunk of chunks) {
       const isPending = /Status:.*pending/i.test(chunk);
-      const matchesHost = chunk.includes(`${MCP_HOST}:${port}`);
+      const endpointsMatch = chunk.match(/Endpoints:\s*(.+)/);
+      const matchesHost =
+        endpointsMatch && endpointsMatch[1].trim() === exactEndpoint;
       if (!isPending || !matchesHost) continue;
 
       const idMatch = chunk.match(
@@ -248,8 +268,9 @@ function add(sandboxName, opts) {
     process.exit(1);
   }
 
-  // Validate env vars are set
+  // Validate env var names and values
   for (const v of env) {
+    validateEnvName(v);
     if (!process.env[v]) {
       console.error(`  Environment variable ${v} is not set.`);
       process.exit(1);
@@ -269,7 +290,7 @@ function add(sandboxName, opts) {
   // Start the proxy on 127.0.0.1 (not exposed to network)
   console.log(`  Starting MCP proxy for '${name}' on port ${port}...`);
   const dir = pidDir(sandboxName);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   // Split command into exe + args at add-time so the stored values are pre-split
   const cmdParts = command.split(/\s+/);
@@ -316,9 +337,11 @@ function add(sandboxName, opts) {
     return;
   }
 
+  // name is validated by validateName (alphanumeric + hyphens/underscores only)
+  // port is a validated integer — both are safe to interpolate
   const configOut = sshExec(
     sandboxName,
-    `mcporter config add ${name} --url http://${MCP_HOST}:${port} --scope home 2>&1`,
+    `mcporter config add '${name}' --url 'http://${MCP_HOST}:${port}' --scope home 2>&1`,
   );
   if (!configOut || /error/i.test(configOut)) {
     console.error("  mcporter config add failed. Rolling back...");
@@ -382,7 +405,7 @@ function remove(sandboxName, serverName) {
   } catch {}
 
   // Remove from sandbox mcporter config
-  sshExec(sandboxName, `mcporter config remove ${serverName} 2>&1 || true`);
+  sshExec(sandboxName, `mcporter config remove '${serverName}' 2>&1 || true`);
 
   // Remove from registry
   delete sandbox.mcp[serverName];
@@ -476,7 +499,7 @@ function restart(sandboxName, serverName) {
 
     // Start proxy
     const dir = pidDir(sandboxName);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
     // Use stored exe/args if available, fall back to splitting command for older entries
     const exe = entry.exe || entry.command.split(/\s+/)[0];
