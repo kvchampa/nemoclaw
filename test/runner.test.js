@@ -334,8 +334,6 @@ describe("regression guards", () => {
       }
     });
 
-    it("telegram bridge validates SANDBOX_NAME on startup", () => {
-
     it("walkthrough.sh does not embed NVIDIA_API_KEY in tmux or sandbox commands", () => {
       const fs = require("fs");
       const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "walkthrough.sh"), "utf-8");
@@ -347,6 +345,13 @@ describe("regression guards", () => {
       for (const line of cmdLines) {
         expect(line.includes("NVIDIA_API_KEY")).toBe(false);
       }
+    });
+
+    it("telegram bridge validates SANDBOX_NAME on startup", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
+      expect(src.includes("validateName(SANDBOX")).toBeTruthy();
+      expect(src.includes("execSync")).toBe(false);
     });
   });
 });

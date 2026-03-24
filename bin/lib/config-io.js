@@ -109,7 +109,7 @@ class ConfigPermissionError extends Error {
 }
 
 function buildRemediation(configPath) {
-  const home = process.env.HOME || "~";
+  const home = process.env.HOME || require("os").homedir();
   const nemoclawDir = path.join(home, ".nemoclaw");
   return [
     "  To fix, run one of:",
