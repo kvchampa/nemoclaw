@@ -55,8 +55,8 @@ RUN mkdir -p /sandbox/.openclaw-data/agents/main/agent \
     && ln -s /sandbox/.openclaw-data/update-check.json /sandbox/.openclaw/update-check.json \
     && chown -R sandbox:sandbox /sandbox/.openclaw /sandbox/.openclaw-data
 
-# Install OpenClaw CLI and PyYAML for blueprint runner (single layer)
-RUN npm install -g openclaw@2026.3.11 \
+# Install OpenClaw CLI, mcporter (MCP bridge client), and PyYAML (single layer)
+RUN npm install -g openclaw@2026.3.11 mcporter@0.7.3 \
     && pip3 install --no-cache-dir --break-system-packages "pyyaml==6.0.3"
 
 # Copy built plugin and blueprint into the sandbox

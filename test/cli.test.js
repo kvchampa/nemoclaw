@@ -65,7 +65,9 @@ describe("CLI dispatch", () => {
   it("debug --help exits 0 and shows usage", () => {
     const r = run("debug --help");
     expect(r.code).toBe(0);
-    expect(r.out.includes("Collect NemoClaw diagnostic information")).toBeTruthy();
+    expect(
+      r.out.includes("Collect NemoClaw diagnostic information"),
+    ).toBeTruthy();
     expect(r.out.includes("--quick")).toBeTruthy();
     expect(r.out.includes("--output")).toBeTruthy();
   });
@@ -89,5 +91,15 @@ describe("CLI dispatch", () => {
     expect(r.code).toBe(0);
     expect(r.out.includes("Troubleshooting")).toBeTruthy();
     expect(r.out.includes("nemoclaw debug")).toBeTruthy();
+  });
+
+  it("help mentions MCP Bridges section", () => {
+    const r = run("help");
+    expect(r.code).toBe(0);
+    expect(r.out.includes("MCP Bridges")).toBeTruthy();
+    expect(r.out.includes("mcp add")).toBeTruthy();
+    expect(r.out.includes("mcp remove")).toBeTruthy();
+    expect(r.out.includes("mcp list")).toBeTruthy();
+    expect(r.out.includes("mcp restart")).toBeTruthy();
   });
 });
