@@ -139,7 +139,6 @@ if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
   exec "${NEMOCLAW_CMD[@]}"
 fi
 
-nohup openclaw gateway run >/tmp/gateway.log 2>&1 &
-echo "[gateway] openclaw gateway launched (pid $!)"
 start_auto_pair
 print_dashboard_urls
+exec openclaw gateway run

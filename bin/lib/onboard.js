@@ -388,9 +388,10 @@ async function preflight() {
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — gateway (8080) and dashboard (18789)
+  // Required ports — gateway (default 8080, configurable) and dashboard (18789)
+  const gatewayPort = parseInt(process.env.OPENSHELL_GATEWAY_PORT || "8080", 10);
   const requiredPorts = [
-    { port: 8080, label: "OpenShell gateway" },
+    { port: gatewayPort, label: "OpenShell gateway" },
     { port: 18789, label: "NemoClaw dashboard" },
   ];
   for (const { port, label } of requiredPorts) {
@@ -445,7 +446,8 @@ async function startGateway(gpu) {
   // Destroy old gateway
   run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
 
-  const gwArgs = ["--name", "nemoclaw"];
+  const gatewayPort = parseInt(process.env.OPENSHELL_GATEWAY_PORT || "8080", 10);
+  const gwArgs = ["--name", "nemoclaw", "--port", String(gatewayPort)];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
   // routed through a host-side provider (Ollama, vLLM, or cloud API) — the
   // sandbox itself does not need direct GPU access. Passing --gpu causes
