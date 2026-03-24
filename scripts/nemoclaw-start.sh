@@ -133,6 +133,42 @@ echo 'Setting up NemoClaw...'
 # openclaw doctor --fix and openclaw plugins install already ran at build time
 # (Dockerfile Step 28). At runtime they fail with EPERM against the locked
 # /sandbox/.openclaw directory and accomplish nothing.
+
+# Configure outbound proxy so Node.js (openclaw/undici) routes HTTP/HTTPS
+# requests through the OpenShell egress proxy at 10.200.0.1:3128.
+#
+# Without this, Node.js resolves DNS locally before the CONNECT tunnel is
+# opened, hitting `getaddrinfo EAI_AGAIN` because the sandbox network
+# namespace has no DNS resolver configured.  The proxy handles DNS on behalf
+# of the sandbox, so exporting HTTPS_PROXY causes undici/node:http to skip
+# local resolution entirely.  curl already does this correctly (it uses the
+# proxy's DNS), and these env vars bring parity to Node.js callers.
+#
+# NEMOCLAW_PROXY_HOST can be set at sandbox creation time to override the
+# default if the gateway IP changes in a future OpenShell release.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/626
+PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
+PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
+export HTTP_PROXY="http://${PROXY_HOST}:${PROXY_PORT}"
+export HTTPS_PROXY="http://${PROXY_HOST}:${PROXY_PORT}"
+# Bypass proxy for loopback, sandbox-local, and the OpenShell virtual network
+# so internal gateway calls (openclaw dashboard, inference.local) stay fast.
+export NO_PROXY="localhost,127.0.0.1,::1,inference.local,10.200.0.1"
+# OpenShell injects its own NO_PROXY=127.0.0.1,localhost,::1 when a user
+# connects to the sandbox via `openshell sandbox connect`, overwriting the
+# value set above.  Write a profile.d snippet so the full value is restored
+# on every login shell — both initial and subsequent `connect` sessions.
+# /etc/profile.d/ is writable by root during startup (this script runs as the
+# entrypoint before Landlock lockdown applies to that path).
+if [ -d /etc/profile.d ]; then
+  cat >/etc/profile.d/nemoclaw-proxy.sh <<PROXYPROFILE
+# Set by nemoclaw-start.sh — restores full NO_PROXY after OpenShell injection.
+export HTTP_PROXY="http://${PROXY_HOST}:${PROXY_PORT}"
+export HTTPS_PROXY="http://${PROXY_HOST}:${PROXY_PORT}"
+export NO_PROXY="localhost,127.0.0.1,::1,inference.local,10.200.0.1"
+PROXYPROFILE
+fi
+
 write_auth_profile
 
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
