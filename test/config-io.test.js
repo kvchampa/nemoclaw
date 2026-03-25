@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 
 // Redirect HOME to a temp dir so tests don't touch real ~/.nemoclaw
-const origHome = process.env.HOME;
+const _origHome = process.env.HOME;
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-configio-"));
 process.env.HOME = tmpDir;
 
@@ -34,7 +34,7 @@ afterEach(() => {
     if (fs.existsSync(testDir)) {
       fs.chmodSync(testDir, 0o700);
     }
-  } catch {}
+  } catch (_e) { /* best effort */ }
 });
 
 describe("config-io", () => {

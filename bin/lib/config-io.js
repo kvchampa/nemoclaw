@@ -58,7 +58,7 @@ function writeConfigFile(filePath, data) {
     fs.renameSync(tmpFile, filePath);
   } catch (err) {
     // Clean up temp file on failure
-    try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(tmpFile); } catch (_e) { /* best effort cleanup */ }
     if (err.code === "EACCES") {
       throw new ConfigPermissionError(
         `Cannot write config file: ${filePath}`,
@@ -108,7 +108,7 @@ class ConfigPermissionError extends Error {
   }
 }
 
-function buildRemediation(configPath) {
+function buildRemediation(_configPath) {
   const home = process.env.HOME || require("os").homedir();
   const nemoclawDir = path.join(home, ".nemoclaw");
   return [

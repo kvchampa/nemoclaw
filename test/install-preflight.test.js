@@ -278,10 +278,10 @@ exit 98
           const src = path.join(dir, entry);
           const dst = path.join(safeSystemBin, entry);
           if (!fs.existsSync(dst)) {
-            try { fs.symlinkSync(src, dst); } catch {}
+            try { fs.symlinkSync(src, dst); } catch (_e) { /* best effort */ }
           }
         }
-      } catch {}
+      } catch (_e) { /* best effort */ }
     }
 
     const result = spawnSync("bash", [INSTALLER], {

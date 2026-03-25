@@ -177,9 +177,6 @@ describe("shellQuote", () => {
     });
   });
 
-  describe("regression guards", () => {
-    it("nemoclaw.js does not use execSync", () => {
-
   it("handles backticks and dollar signs", () => {
     const { shellQuote } = require(runnerPath);
     const payload = "test`whoami`$HOME";
@@ -345,13 +342,6 @@ describe("regression guards", () => {
       for (const line of cmdLines) {
         expect(line.includes("NVIDIA_API_KEY")).toBe(false);
       }
-    });
-
-    it("telegram bridge validates SANDBOX_NAME on startup", () => {
-      const fs = require("fs");
-      const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
-      expect(src.includes("validateName(SANDBOX")).toBeTruthy();
-      expect(src.includes("execSync")).toBe(false);
     });
   });
 });

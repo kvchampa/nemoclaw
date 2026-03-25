@@ -24,4 +24,3 @@ network_policies:
       - { path: /sandbox/.venv/bin/pip* }
       - { path: /sandbox/.uv/python/**/python* }
       - { path: /sandbox/.local/bin/pip* }
-
