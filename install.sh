@@ -450,7 +450,14 @@ install_nemoclaw() {
       || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     spin "Installing NemoClaw dependencies" npm install --ignore-scripts
     spin "Building NemoClaw plugin" bash -c 'cd nemoclaw && npm install --ignore-scripts && npm run build'
-    spin "Linking NemoClaw CLI" npm link
+    # Use sudo for npm link only when the global prefix is not writable
+    local npm_global_prefix
+    npm_global_prefix="$(npm config get prefix 2>/dev/null)" || true
+    local sudo_cmd=""
+    if [ -n "$npm_global_prefix" ] && [ ! -w "$npm_global_prefix" ] && [ "$(id -u)" -ne 0 ]; then
+      sudo_cmd="sudo"
+    fi
+    spin "Linking NemoClaw CLI" $sudo_cmd npm link
   else
     info "Installing NemoClaw from GitHub…"
     # Clone first so we can pre-extract openclaw before npm install (GH-503).
@@ -464,7 +471,14 @@ install_nemoclaw() {
       || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     spin "Installing NemoClaw dependencies" bash -c "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
     spin "Building NemoClaw plugin" bash -c "cd \"$nemoclaw_src\"/nemoclaw && npm install --ignore-scripts && npm run build"
-    spin "Linking NemoClaw CLI" bash -c "cd \"$nemoclaw_src\" && npm link"
+    # Use sudo for npm link only when the global prefix is not writable
+    local npm_global_prefix
+    npm_global_prefix="$(npm config get prefix 2>/dev/null)" || true
+    local sudo_cmd=""
+    if [ -n "$npm_global_prefix" ] && [ ! -w "$npm_global_prefix" ] && [ "$(id -u)" -ne 0 ]; then
+      sudo_cmd="sudo"
+    fi
+    spin "Linking NemoClaw CLI" bash -c "cd \"$nemoclaw_src\" && $sudo_cmd npm link"
   fi
 
   refresh_path
