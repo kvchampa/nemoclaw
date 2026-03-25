@@ -173,7 +173,8 @@ $ nemoclaw status
 ### `nemoclaw debug`
 
 Collect diagnostic information for bug reports.
-The command gathers system, GPU, Docker, OpenShell, and sandbox internals into a single report with secrets automatically redacted.
+The command gathers system, GPU, Docker, OpenShell, and sandbox internals into a single report with known secret patterns automatically redacted.
+Review the output for any remaining sensitive data before sharing.
 
 ```console
 $ nemoclaw debug [--quick] [--sandbox NAME] [--output PATH]
