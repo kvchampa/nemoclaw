@@ -175,6 +175,12 @@ function applyPreset(sandboxName, presetName) {
     merged = "version: 1\n\nnetwork_policies:\n" + presetEntries;
   }
 
+  // Disclose the egress endpoints being added so the operator can audit
+  const endpoints = getPresetEndpoints(presetContent);
+  if (endpoints.length > 0) {
+    console.log(`  Widening sandbox egress — adding: ${endpoints.join(", ")}`);
+  }
+
   // Write temp file and apply
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-"));
   const tmpFile = path.join(tmpDir, "policy.yaml");
