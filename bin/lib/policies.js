@@ -52,7 +52,7 @@ function getPresetEndpoints(content) {
   const regex = /host:\s*([^\s,}]+)/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
-    hosts.push(match[1]);
+    hosts.push(match[1].replace(/^["']|["']$/g, ""));
   }
   return hosts;
 }

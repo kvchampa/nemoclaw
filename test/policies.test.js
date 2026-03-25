@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import path from "node:path";
 import policies from "../bin/lib/policies";
 
@@ -66,6 +66,45 @@ describe("policies", () => {
         const hosts = policies.getPresetEndpoints(content);
         expect(hosts.length > 0).toBeTruthy();
       }
+    });
+
+    it("strips surrounding quotes from hostnames", () => {
+      const yaml = 'host: "example.com"\n  host: \'other.com\'';
+      const hosts = policies.getPresetEndpoints(yaml);
+      expect(hosts).toEqual(["example.com", "other.com"]);
+    });
+  });
+
+  describe("applyPreset disclosure logging", () => {
+    it("logs egress endpoints before applying", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("exit"); });
+
+      try {
+        policies.applyPreset("test-sandbox", "npm");
+      } catch {}
+
+      const messages = logSpy.mock.calls.map((c) => c[0]);
+      expect(messages.some((m) => typeof m === "string" && m.includes("Widening sandbox egress"))).toBe(true);
+
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    });
+
+    it("does not log when preset has no endpoints", () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // loadPreset returns null for nonexistent presets → early return
+      policies.applyPreset("test-sandbox", "nonexistent");
+
+      const messages = logSpy.mock.calls.map((c) => c[0]);
+      expect(messages.some((m) => typeof m === "string" && m.includes("Widening sandbox egress"))).toBe(false);
+
+      logSpy.mockRestore();
+      errSpy.mockRestore();
     });
   });
 
