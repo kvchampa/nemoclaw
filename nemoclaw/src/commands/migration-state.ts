@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
@@ -559,7 +560,9 @@ function prepareSandboxState(snapshotDir: string, manifest: SnapshotManifest): s
     }
   }
 
-  writeFileSync(path.join(preparedStateDir, "openclaw.json"), JSON.stringify(config, null, 2));
+  const configPath = path.join(preparedStateDir, "openclaw.json");
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  chmodSync(configPath, 0o600);
   return preparedStateDir;
 }
 
@@ -589,7 +592,9 @@ export function createSnapshotBundle(
     if (hostState.configPath && hostState.hasExternalConfig) {
       const configSnapshotDir = path.join(parentDir, "config");
       mkdirSync(configSnapshotDir, { recursive: true });
-      copyFileSync(hostState.configPath, path.join(configSnapshotDir, "openclaw.json"));
+      const configSnapshotPath = path.join(configSnapshotDir, "openclaw.json");
+      copyFileSync(hostState.configPath, configSnapshotPath);
+      chmodSync(configSnapshotPath, 0o600);
     }
 
     const externalRoots: MigrationExternalRoot[] = [];
@@ -666,6 +671,75 @@ export function restoreSnapshotToHost(snapshotDir: string, logger: PluginLogger)
     return false;
   }
 
+  // SECURITY (C-4): Validate that write targets are within a trusted root.
+  // Use the host's actual home directory — NOT manifest.homeDir which is
+  // attacker-controlled data from the snapshot JSON.
+  const trustedRoot = resolveHostHome();
+
+  // Validate manifest.homeDir itself is within trusted root
+  if (typeof manifest.homeDir !== "string" || !isWithinRoot(manifest.homeDir, trustedRoot)) {
+    logger.error(
+      `Snapshot manifest homeDir is outside the trusted host root. ` +
+        `Refusing to restore. homeDir=${manifest.homeDir}, trustedRoot=${trustedRoot}`,
+    );
+    return false;
+  }
+
+  // Validate stateDir type and containment
+  if (typeof manifest.stateDir !== "string") {
+    logger.error(`Snapshot manifest stateDir is not a string. Refusing to restore.`);
+    return false;
+  }
+
+  // Support OPENCLAW_STATE_DIR env override: when set, require exact match
+  const envStateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (envStateDir) {
+    const resolvedEnvStateDir = resolveUserPath(envStateDir);
+    if (normalizeHostPath(manifest.stateDir) !== normalizeHostPath(resolvedEnvStateDir)) {
+      logger.error(
+        `Snapshot manifest stateDir does not match OPENCLAW_STATE_DIR. ` +
+          `Refusing to restore. stateDir=${manifest.stateDir}, expected=${resolvedEnvStateDir}`,
+      );
+      return false;
+    }
+  } else if (!isWithinRoot(manifest.stateDir, trustedRoot)) {
+    logger.error(
+      `Snapshot manifest stateDir is outside the trusted host root. ` +
+        `Refusing to restore. stateDir=${manifest.stateDir}, trustedRoot=${trustedRoot}`,
+    );
+    return false;
+  }
+
+  if (manifest.hasExternalConfig) {
+    // Validate configPath type — fail closed when hasExternalConfig is true
+    // but configPath is null/empty (partial restore would silently skip config).
+    if (typeof manifest.configPath !== "string" || !manifest.configPath.trim()) {
+      logger.error(
+        `Snapshot manifest has hasExternalConfig=true but configPath is missing or empty. Refusing to restore.`,
+      );
+      return false;
+    }
+
+    // Support OPENCLAW_CONFIG_PATH env override: when set, require exact match
+    const envConfigPath = process.env.OPENCLAW_CONFIG_PATH?.trim();
+    if (envConfigPath) {
+      const resolvedEnvConfigPath = resolveUserPath(envConfigPath);
+      if (normalizeHostPath(manifest.configPath) !== normalizeHostPath(resolvedEnvConfigPath)) {
+        logger.error(
+          `Snapshot manifest configPath does not match OPENCLAW_CONFIG_PATH. ` +
+            `Refusing to restore. configPath=${manifest.configPath}, expected=${resolvedEnvConfigPath}`,
+        );
+        return false;
+      }
+    } else if (!isWithinRoot(manifest.configPath, trustedRoot)) {
+      logger.error(
+        `Snapshot manifest configPath is outside the trusted host root. ` +
+          `Refusing to restore. configPath=${manifest.configPath}, trustedRoot=${trustedRoot}`,
+      );
+      return false;
+    }
+  }
+
   try {
     if (existsSync(manifest.stateDir)) {
       const archiveName = `${manifest.stateDir}.nemoclaw-archived-${String(Date.now())}`;
@@ -680,6 +754,7 @@ export function restoreSnapshotToHost(snapshotDir: string, logger: PluginLogger)
       const configSnapshotPath = path.join(snapshotDir, "config", "openclaw.json");
       mkdirSync(path.dirname(manifest.configPath), { recursive: true });
       copyFileSync(configSnapshotPath, manifest.configPath);
+      chmodSync(manifest.configPath, 0o600);
       logger.info(`Restored external config to ${manifest.configPath}`);
     }
 

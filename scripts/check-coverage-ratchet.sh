@@ -11,7 +11,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 THRESHOLD_FILE="$REPO_ROOT/ci/coverage-threshold.json"
-SUMMARY_FILE="$REPO_ROOT/nemoclaw/coverage/coverage-summary.json"
+SUMMARY_FILE="$REPO_ROOT/coverage/coverage-summary.json"
 
 if [ ! -f "$THRESHOLD_FILE" ]; then
   echo "ERROR: Threshold file not found: $THRESHOLD_FILE"
@@ -20,7 +20,7 @@ fi
 
 if [ ! -f "$SUMMARY_FILE" ]; then
   echo "ERROR: Coverage summary not found: $SUMMARY_FILE"
-  echo "Run 'npx vitest run --coverage' in nemoclaw/ first."
+  echo "Run 'npx vitest run --coverage' first."
   exit 1
 fi
 

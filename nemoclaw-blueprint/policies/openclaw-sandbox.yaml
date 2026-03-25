@@ -157,9 +157,9 @@ network_policies:
       - { path: /usr/local/bin/openclaw }
       - { path: /usr/local/bin/npm }
 
-  # ── Messaging — pre-allowed for agent notifications ────────────
-  # Telegram Bot API is open by default so the agent can send
-  # notifications and respond to chats without triggering approval.
+  # ── Messaging — pre-allowed for OpenClaw agent notifications ────
+  # Restricted to node processes to prevent arbitrary data exfiltration
+  # via curl, wget, python, etc. (See: #272)
   telegram:
     name: telegram
     endpoints:
@@ -171,3 +171,34 @@ network_policies:
         rules:
           - allow: { method: GET, path: "/bot*/**" }
           - allow: { method: POST, path: "/bot*/**" }
+    binaries:
+      - { path: /usr/local/bin/node }
+
+  discord:
+    name: discord
+    endpoints:
+      - host: discord.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+      - host: gateway.discord.gg
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+          - allow: { method: POST, path: "/**" }
+      - host: cdn.discordapp.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: GET, path: "/**" }
+    binaries:
+      - { path: /usr/local/bin/node }

@@ -7,6 +7,19 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+// ---------------------------------------------------------------------------
+// Color / style — respects NO_COLOR and non-TTY environments.
+// Uses exact NVIDIA green #76B900 on truecolor terminals; 256-color otherwise.
+// ---------------------------------------------------------------------------
+const _useColor = !process.env.NO_COLOR && !!process.stdout.isTTY;
+const _tc = _useColor && (process.env.COLORTERM === "truecolor" || process.env.COLORTERM === "24bit");
+const G = _useColor ? (_tc ? "\x1b[38;2;118;185;0m" : "\x1b[38;5;148m") : "";
+const B = _useColor ? "\x1b[1m" : "";
+const D = _useColor ? "\x1b[2m" : "";
+const R = _useColor ? "\x1b[0m" : "";
+const RD = _useColor ? "\x1b[1;31m" : "";
+const YW = _useColor ? "\x1b[1;33m" : "";
+
 const { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName } = require("./lib/runner");
 const {
   ensureApiKey,
@@ -23,7 +36,7 @@ const policies = require("./lib/policies");
 const GLOBAL_COMMANDS = new Set([
   "onboard", "list", "deploy", "setup", "setup-spark",
   "start", "stop", "status", "debug", "uninstall",
-  "help", "--help", "-h",
+  "help", "--help", "-h", "--version", "-v",
 ]);
 
 const REMOTE_UNINSTALL_URL = "https://raw.githubusercontent.com/NVIDIA/NemoClaw/refs/heads/main/uninstall.sh";
@@ -83,8 +96,8 @@ async function setup() {
 }
 
 async function setupSpark() {
-  await ensureApiKey();
-  run(`sudo -E NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)} bash "${SCRIPTS}/setup-spark.sh"`);
+  // setup-spark.sh configures Docker cgroups — it does not use NVIDIA_API_KEY.
+  run(`sudo bash "${SCRIPTS}/setup-spark.sh"`);
 }
 
 async function deploy(instanceName) {
@@ -141,16 +154,19 @@ async function deploy(instanceName) {
 
   run(`brev refresh`, { ignoreError: true });
 
-  console.log("  Waiting for SSH...");
+  process.stdout.write(`  Waiting for SSH `);
   for (let i = 0; i < 60; i++) {
     try {
       execFileSync("ssh", ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", name, "echo", "ok"], { encoding: "utf-8", stdio: "ignore" });
+      process.stdout.write(` ${G}✓${R}\n`);
       break;
     } catch {
       if (i === 59) {
+        process.stdout.write("\n");
         console.error(`  Timed out waiting for SSH to ${name}`);
         process.exit(1);
       }
+      process.stdout.write(".");
       spawnSync("sleep", ["3"]);
     }
   }
@@ -164,11 +180,16 @@ async function deploy(instanceName) {
   if (ghToken) envLines.push(`GITHUB_TOKEN=${shellQuote(ghToken)}`);
   const tgToken = getCredential("TELEGRAM_BOT_TOKEN");
   if (tgToken) envLines.push(`TELEGRAM_BOT_TOKEN=${shellQuote(tgToken)}`);
+  const discordToken = getCredential("DISCORD_BOT_TOKEN");
+  if (discordToken) envLines.push(`DISCORD_BOT_TOKEN=${shellQuote(discordToken)}`);
+  const slackToken = getCredential("SLACK_BOT_TOKEN");
+  if (slackToken) envLines.push(`SLACK_BOT_TOKEN=${shellQuote(slackToken)}`);
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-"));
   const envTmp = path.join(envDir, "env");
   fs.writeFileSync(envTmp, envLines.join("\n") + "\n", { mode: 0o600 });
   try {
     run(`scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
+    run(`ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'chmod 600 /home/ubuntu/nemoclaw/.env'`);
   } finally {
     try { fs.unlinkSync(envTmp); } catch {}
     try { fs.rmdirSync(envDir); } catch {}
@@ -304,7 +325,7 @@ function sandboxStatus(sandboxName) {
   run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
   // NIM health
-  const nimStat = nim.nimStatus(sandboxName);
+  const nimStat = sb && sb.nimContainer ? nim.nimStatusByName(sb.nimContainer) : nim.nimStatus(sandboxName);
   console.log(`    NIM:      ${nimStat.running ? `running (${nimStat.container})` : "not running"}`);
   if (nimStat.running) {
     console.log(`    Healthy:  ${nimStat.healthy ? "yes" : "no"}`);
@@ -352,44 +373,59 @@ function sandboxPolicyList(sandboxName) {
   console.log("");
 }
 
-function sandboxDestroy(sandboxName) {
+async function sandboxDestroy(sandboxName, args = []) {
+  const skipConfirm = args.includes("--yes") || args.includes("--force");
+  if (!skipConfirm) {
+    const { prompt: askPrompt } = require("./lib/credentials");
+    const answer = await askPrompt(
+      `  ${YW}Destroy sandbox '${sandboxName}'?${R} This cannot be undone. [y/N]: `,
+    );
+    if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
+      console.log("  Cancelled.");
+      return;
+    }
+  }
+
   console.log(`  Stopping NIM for '${sandboxName}'...`);
-  nim.stopNimContainer(sandboxName);
+  const sb = registry.getSandbox(sandboxName);
+  if (sb && sb.nimContainer) nim.stopNimContainerByName(sb.nimContainer);
+  else nim.stopNimContainer(sandboxName);
 
   console.log(`  Deleting sandbox '${sandboxName}'...`);
   run(`openshell sandbox delete ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
   registry.removeSandbox(sandboxName);
-  console.log(`  ✓ Sandbox '${sandboxName}' destroyed`);
+  console.log(`  ${G}✓${R} Sandbox '${sandboxName}' destroyed`);
 }
 
 // ── Help ─────────────────────────────────────────────────────────
 
 function help() {
+  const pkg = require(path.join(__dirname, "..", "package.json"));
   console.log(`
-  nemoclaw — NemoClaw CLI
+  ${B}${G}NemoClaw${R}  ${D}v${pkg.version}${R}
+  ${D}Deploy more secure, always-on AI assistants with a single command.${R}
 
-  Getting Started:
-    nemoclaw onboard                 Interactive setup wizard (recommended)
-    nemoclaw setup                   Legacy setup (deprecated, use onboard)
-    nemoclaw setup-spark             Set up on DGX Spark (fixes cgroup v2 + Docker)
+  ${G}Getting Started:${R}
+    ${B}nemoclaw onboard${R}                 Configure inference endpoint and credentials
+    nemoclaw setup-spark             Set up on DGX Spark ${D}(fixes cgroup v2 + Docker)${R}
 
-  Sandbox Management:
-    nemoclaw list                    List all sandboxes
-    nemoclaw <name> connect          Connect to a sandbox
-    nemoclaw <name> status           Show sandbox status and health
-    nemoclaw <name> logs [--follow]  View sandbox logs
-    nemoclaw <name> destroy          Stop NIM + delete sandbox
+  ${G}Sandbox Management:${R}
+    ${B}nemoclaw list${R}                    List all sandboxes
+    nemoclaw <name> connect          Shell into a running sandbox
+    nemoclaw <name> status           Sandbox health + NIM status
+    nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
+    nemoclaw <name> destroy          Stop NIM + delete sandbox ${D}(--yes to skip prompt)${R}
 
-  Policy Presets:
-    nemoclaw <name> policy-add       Add a policy preset to a sandbox
-    nemoclaw <name> policy-list      List presets (● = applied)
+  ${G}Policy Presets:${R}
+    nemoclaw <name> policy-add       Add a network or filesystem policy preset
+    nemoclaw <name> policy-list      List presets ${D}(● = applied)${R}
 
-  Deploy:
+  ${G}Deploy:${R}
     nemoclaw deploy <instance>       Deploy to a Brev VM and start services
 
-  Services:
-    nemoclaw start                   Start services (Telegram, tunnel)
+  ${G}Services:${R}
+    nemoclaw start                   Start auxiliary services ${D}(Telegram, tunnel)${R}
     nemoclaw stop                    Stop all services
     nemoclaw status                  Show sandbox list and service status
 
@@ -400,13 +436,14 @@ function help() {
   Cleanup:
     nemoclaw uninstall [flags]       Run uninstall.sh (local first, curl fallback)
 
-  Uninstall flags:
+  ${G}Uninstall flags:${R}
     --yes                            Skip the confirmation prompt
     --keep-openshell                 Leave the openshell binary installed
     --delete-models                  Remove NemoClaw-pulled Ollama models
 
-  Credentials are prompted on first use, then saved securely
-  in ~/.nemoclaw/credentials.json (mode 600).
+  ${D}Powered by NVIDIA OpenShell · Nemotron · Agent Toolkit
+  Credentials saved in ~/.nemoclaw/credentials.json (mode 600)${R}
+  ${D}https://www.nvidia.com/nemoclaw${R}
 `);
 }
 
@@ -434,6 +471,12 @@ const [cmd, ...args] = process.argv.slice(2);
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
       case "list":        listSandboxes(); break;
+      case "--version":
+      case "-v": {
+        const pkg = require(path.join(__dirname, "..", "package.json"));
+        console.log(`nemoclaw v${pkg.version}`);
+        break;
+      }
       default:            help(); break;
     }
     return;
@@ -452,7 +495,7 @@ const [cmd, ...args] = process.argv.slice(2);
       case "logs":        sandboxLogs(cmd, actionArgs.includes("--follow")); break;
       case "policy-add":  await sandboxPolicyAdd(cmd); break;
       case "policy-list": sandboxPolicyList(cmd); break;
-      case "destroy":     sandboxDestroy(cmd); break;
+      case "destroy":     await sandboxDestroy(cmd, actionArgs); break;
       default:
         console.error(`  Unknown action: ${action}`);
         console.error(`  Valid actions: connect, status, logs, policy-add, policy-list, destroy`);
