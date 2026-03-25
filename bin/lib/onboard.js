@@ -1482,6 +1482,26 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   });
 
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
+
+  // Warn if Landlock filesystem restrictions may silently degrade.
+  // The base policy uses compatibility: best_effort which is silent on failure.
+  if (process.platform === "darwin") {
+    console.warn("  ⚠ Landlock: macOS host — filesystem isolation depends on the Docker VM kernel.");
+  } else if (process.platform === "linux") {
+    try {
+      const uname = runCapture("uname -r", { ignoreError: true });
+      if (uname) {
+        const parts = uname.split(".");
+        const major = parseInt(parts[0], 10);
+        const minor = parseInt(parts[1], 10);
+        if (!isNaN(major) && !isNaN(minor) && (major < 5 || (major === 5 && minor < 13))) {
+          console.warn(`  ⚠ Landlock: Kernel ${uname} does not support Landlock (requires ≥5.13).`);
+          console.warn("    Sandbox filesystem restrictions will silently degrade (best_effort mode).");
+        }
+      }
+    } catch {}
+  }
+
   return sandboxName;
 }
 
