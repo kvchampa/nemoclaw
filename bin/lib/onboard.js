@@ -6,10 +6,48 @@
 // NEMOCLAW_NON_INTERACTIVE=1 env var for CI/CD pipelines.
 
 const fs = require("fs");
+const net = require("net");
 const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, run, runCapture, shellQuote } = require("./runner");
+
+/**
+ * Find the next available TCP port starting from startPort.
+ *
+ * @param {number} startPort - The port to start checking from.
+ * @param {number} maxAttempts - The maximum number of ports to probe (default 100).
+ * @param {number[]} excludePorts - Ports to skip during selection (default []).
+ * @returns {Promise<number>} - Resolves with the first available port.
+ */
+function findFreePort(startPort, maxAttempts = 100, excludePorts = []) {
+  return new Promise((resolve, reject) => {
+    if (startPort > 65535 || maxAttempts <= 0) {
+      const lastPort = startPort - (100 - maxAttempts);
+      return reject(new Error(`Could not find a free port after 100 attempts starting from ${lastPort}`));
+    }
+
+    if (excludePorts.includes(startPort)) {
+      return resolve(findFreePort(startPort + 1, maxAttempts - 1, excludePorts));
+    }
+
+    const server = net.createServer();
+    server.once("error", (err) => {
+      // @ts-ignore - ErrnoException has .code
+      if (err && err.code === "EADDRINUSE") {
+        return resolve(findFreePort(startPort + 1, maxAttempts - 1, excludePorts));
+      }
+      return reject(err);
+    });
+
+    server.listen(startPort, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = (addr && typeof addr !== "string") ? addr.port : startPort;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
 const {
   getDefaultOllamaModel,
   getBootstrapOllamaModelOptions,
@@ -1194,6 +1232,12 @@ function getNonInteractiveModel(providerKey) {
 
 // ── Step 1: Preflight ────────────────────────────────────────────
 
+/**
+ * Run preflight checks to ensure the environment is ready for onboarding.
+ * Checks Docker, container runtime, OpenShell CLI, and port availability.
+ *
+ * @returns {Promise<{gpu: Object, gatewayPort: number}>} - Detected GPU info and decided gateway port.
+ */
 async function preflight() {
   step(1, 7, "Preflight checks");
 
@@ -1245,40 +1289,59 @@ async function preflight() {
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — gateway (8080) and dashboard (18789)
-  const requiredPorts = [
-    { port: 8080, label: "OpenShell gateway" },
-    { port: 18789, label: "NemoClaw dashboard" },
-  ];
-  for (const { port, label } of requiredPorts) {
-    const portCheck = await checkPortAvailable(port);
-    if (!portCheck.ok) {
-      console.error("");
-      console.error(`  !! Port ${port} is not available.`);
-      console.error(`     ${label} needs this port.`);
-      console.error("");
-      if (portCheck.process && portCheck.process !== "unknown") {
-        console.error(`     Blocked by: ${portCheck.process}${portCheck.pid ? ` (PID ${portCheck.pid})` : ""}`);
-        console.error("");
-        console.error("     To fix, stop the conflicting process:");
-        console.error("");
-        if (portCheck.pid) {
-          console.error(`       sudo kill ${portCheck.pid}`);
-        } else {
-          console.error(`       lsof -i :${port} -sTCP:LISTEN -P -n`);
-        }
-        console.error("       # or, if it's a systemd service:");
-        console.error("       systemctl --user stop openclaw-gateway.service");
-      } else {
-        console.error(`     Could not identify the process using port ${port}.`);
-        console.error(`     Run: lsof -i :${port} -sTCP:LISTEN`);
-      }
-      console.error("");
-      console.error(`     Detail: ${portCheck.reason}`);
-      process.exit(1);
-    }
-    console.log(`  ✓ Port ${port} available (${label})`);
+  // Required ports — gateway (default 8080) and dashboard (18789)
+  const dashboardPort = 18789;
+  const portEnv = process.env.NEMOCLAW_PORT || "8080";
+  const targetGatewayPort = parseInt(portEnv, 10);
+  if (Number.isNaN(targetGatewayPort) || targetGatewayPort < 1 || targetGatewayPort > 65535) {
+    console.error(`  Invalid NEMOCLAW_PORT: ${portEnv}`);
+    console.error("  Must be a number between 1 and 65535.");
+    process.exit(1);
   }
+  if (targetGatewayPort === dashboardPort) {
+    console.error(`  Invalid NEMOCLAW_PORT: ${portEnv}`);
+    console.error(`  Port ${dashboardPort} is reserved for the NemoClaw dashboard.`);
+    process.exit(1);
+  }
+  let gatewayPort = targetGatewayPort;
+
+  // Check OpenShell gateway port with auto-fallback
+  const gatewayCheck = await checkPortAvailable(gatewayPort);
+  if (!gatewayCheck.ok) {
+    const newPort = await findFreePort(gatewayPort + 1, 100, [dashboardPort]);
+    console.log(`  [WARN] Port ${gatewayPort} in use, trying ${newPort}...`);
+    gatewayPort = newPort;
+  }
+  console.log(`  ✓ Port ${gatewayPort} available (OpenShell gateway)`);
+
+  // Dashboard must fail hard since it's hardcoded in the frontend URL right now
+  const dashboardCheck = await checkPortAvailable(dashboardPort);
+  if (!dashboardCheck.ok) {
+    console.error("");
+    console.error(`  !! Port ${dashboardPort} is not available.`);
+    console.error(`     NemoClaw dashboard needs this port.`);
+    console.error("");
+    if (dashboardCheck.process && dashboardCheck.process !== "unknown") {
+      console.error(`     Blocked by: ${dashboardCheck.process}${dashboardCheck.pid ? ` (PID ${dashboardCheck.pid})` : ""}`);
+      console.error("");
+      console.error("     To fix, stop the conflicting process:");
+      console.error("");
+      if (dashboardCheck.pid) {
+        console.error(`       sudo kill ${dashboardCheck.pid}`);
+      } else {
+        console.error(`       lsof -i :${dashboardPort} -sTCP:LISTEN -P -n`);
+      }
+      console.error("       # or, if it's a systemd service:");
+      console.error("       systemctl --user stop openclaw-gateway.service");
+    } else {
+      console.error(`     Could not identify the process using port ${dashboardPort}.`);
+      console.error(`     Run: lsof -i :${dashboardPort} -sTCP:LISTEN`);
+    }
+    console.error("");
+    console.error(`     Detail: ${dashboardCheck.reason}`);
+    process.exit(1);
+  }
+  console.log(`  ✓ Port ${dashboardPort} available (NemoClaw dashboard)`);
 
   // GPU
   const gpu = nim.detectGpu();
@@ -1291,18 +1354,25 @@ async function preflight() {
     console.log("  ⓘ No GPU detected — will use cloud inference");
   }
 
-  return gpu;
+  return { gpu, gatewayPort };
 }
 
 // ── Step 2: Gateway ──────────────────────────────────────────────
 
-async function startGateway(_gpu) {
+/**
+ * Start the OpenShell gateway with the specified configuration.
+ *
+ * @param {Object} gpu - Detected GPU information.
+ * @param {number} gatewayPort - The host port to map to the gateway.
+ * @returns {Promise<void>}
+ */
+async function startGateway(gpu, gatewayPort) {
   step(3, 7, "Starting OpenShell gateway");
 
   // Destroy old gateway
   runOpenshell(["gateway", "destroy", "-g", GATEWAY_NAME], { ignoreError: true });
 
-  const gwArgs = ["--name", GATEWAY_NAME];
+  const gwArgs = ["--name", GATEWAY_NAME, "--port", String(gatewayPort)];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
   // routed through a host-side provider (Ollama, vLLM, or cloud API) — the
   // sandbox itself does not need direct GPU access. Passing --gpu causes
@@ -2253,16 +2323,28 @@ async function onboard(opts = {}) {
   if (isNonInteractive()) note("  (non-interactive mode)");
   console.log("  ===================");
 
-  const gpu = await preflight();
+  const { gpu, gatewayPort: initialGatewayPort } = await preflight();
   const { model, provider, endpointUrl, credentialEnv, preferredInferenceApi, nimContainer } = await setupNim(gpu);
   process.env.NEMOCLAW_OPENSHELL_BIN = getOpenshellBinary();
-  await startGateway(gpu);
+
+  // Re-verify port availability after long setupNim()
+  let gatewayPort = initialGatewayPort;
+  const gatewayStatus = await checkPortAvailable(gatewayPort);
+  if (!gatewayStatus.ok) {
+    const dashboardPort = 18789;
+    gatewayPort = await findFreePort(gatewayPort + 1, 100, [dashboardPort]);
+    console.log(`  [WARN] Port ${initialGatewayPort} became occupied during setup, using ${gatewayPort} instead.`);
+  }
+
+  await startGateway(gpu, gatewayPort);
   await setupInference(GATEWAY_NAME, model, provider, endpointUrl, credentialEnv);
+
   // The key is now stored in openshell's provider config. Clear it from our
   // process environment so new child processes don't inherit it. Note: this
   // does NOT clear /proc/pid/environ (kernel snapshot is immutable after exec),
   // but it prevents run()'s { ...process.env } from propagating the key.
   delete process.env.NVIDIA_API_KEY;
+
   const sandboxName = await createSandbox(gpu, model, provider, preferredInferenceApi);
   if (nimContainer) {
     registry.updateSandbox(sandboxName, { nimContainer });
@@ -2288,4 +2370,5 @@ module.exports = {
   setupNim,
   writeSandboxConfigSyncFile,
   patchStagedDockerfile,
+  findFreePort,
 };

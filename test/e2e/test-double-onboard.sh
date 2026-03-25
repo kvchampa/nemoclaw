@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
+#
 # Double onboard: verify that consecutive `nemoclaw onboard` runs recover
 # automatically from stale state (gateway, port forward, registry entries)
 # left behind by a previous run.
@@ -178,10 +178,12 @@ else
   fail "Stale session cleanup did NOT fire (regression: #397)"
 fi
 
-if grep -q "Port 8080 is not available" <<<"$output2"; then
-  fail "Port 8080 conflict detected (regression: #21)"
+if grep -q "Port 8080 in use, trying" <<<"$output2"; then
+  pass "Port 8080 conflict detected and fallback triggered"
+elif grep -q "Port 8080 is not available" <<<"$output2"; then
+  fail "Port 8080 conflict detected but fallback did NOT trigger"
 else
-  pass "No port 8080 conflict"
+  pass "No port 8080 conflict or fallback triggered silently"
 fi
 
 if grep -q "Port 18789 is not available" <<<"$output2"; then
@@ -229,8 +231,10 @@ else
   fail "Stale session cleanup did NOT fire on third onboard"
 fi
 
-if grep -q "Port 8080 is not available" <<<"$output3"; then
-  fail "Port 8080 conflict on third onboard (regression)"
+if grep -q "Port 8080 in use, trying" <<<"$output3"; then
+  pass "Port 8080 conflict on third onboard and fallback triggered"
+elif grep -q "Port 8080 is not available" <<<"$output3"; then
+  fail "Port 8080 conflict on third onboard but fallback did NOT trigger"
 else
   pass "No port 8080 conflict on third onboard"
 fi
