@@ -170,6 +170,33 @@ Show the sandbox list and the status of auxiliary services.
 $ nemoclaw status
 ```
 
+### `nemoclaw debug`
+
+Collect diagnostic information for bug reports.
+The command gathers system, GPU, Docker, OpenShell, and sandbox internals into a single report with secrets automatically redacted.
+
+```console
+$ nemoclaw debug [--quick] [--sandbox NAME] [--output PATH]
+```
+
+| Flag | Description |
+|---|---|
+| `--quick` | Collect minimal diagnostics only (skips disk, memory-sorted process lists, GPU monitoring, network, and kernel sections). |
+| `--sandbox NAME` | Target a specific sandbox. Defaults to `$NEMOCLAW_SANDBOX` or auto-detects the first sandbox. |
+| `--output PATH` | Write a compressed tarball to `PATH` for attaching to GitHub issues. |
+
+To save a tarball for a bug report:
+
+```console
+$ nemoclaw debug --output /tmp/nemoclaw-debug.tar.gz
+```
+
+The script can also run without a local clone:
+
+```console
+$ curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/scripts/debug.sh | bash -s -- --quick
+```
+
 ### `nemoclaw setup-spark`
 
 Set up NemoClaw on DGX Spark.

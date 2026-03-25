@@ -24,6 +24,14 @@ status: published
 
 This page covers common issues you may encounter when installing, onboarding, or running NemoClaw, along with their resolution steps.
 
+:::{admonition} Collect diagnostics first
+:class: tip
+
+Run `nemoclaw debug` to collect system, GPU, Docker, OpenShell, and sandbox diagnostics into a single redacted report.
+Use `nemoclaw debug --output /tmp/nemoclaw-debug.tar.gz` to save a tarball you can attach to a [GitHub issue](https://github.com/NVIDIA/NemoClaw/issues/new).
+See the [debug command reference](commands.md#nemoclaw-debug) for all flags.
+:::
+
 :::{admonition} Get Help
 :class: tip
 
