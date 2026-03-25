@@ -96,7 +96,7 @@ check_file() {
         broken=$((broken + 1))
       fi
     done
-  done < "$REPO_ROOT/$file"
+  done <"$REPO_ROOT/$file"
 }
 
 # Collect files to check.
@@ -112,11 +112,11 @@ else
     f="${f#"$REPO_ROOT/"}"
     files+=("$f")
   done < <(find "$REPO_ROOT" -name '*.md' -not -path '*/node_modules/*' \
-                              -not -path '*/.venv/*' \
-                              -not -path '*/dist/*' \
-                              -not -path '*/_build/*' \
-                              -not -path '*/_deps/*' \
-                              -print0)
+    -not -path '*/.venv/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/_build/*' \
+    -not -path '*/_deps/*' \
+    -print0)
 fi
 
 echo "Checking ${#files[@]} markdown file(s) for broken relative links..."
