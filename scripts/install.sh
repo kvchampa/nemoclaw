@@ -364,51 +364,11 @@ install_openshell() {
 
 install_openshell
 
-# ── Pre-extract openclaw workaround (GH-503) ────────────────────
-# The openclaw npm tarball is missing directory entries for extensions/,
-# skills/, and dist/plugin-sdk/config/. npm's tar extractor hard-fails on
-# these but system tar handles them fine. We pre-extract openclaw into
-# node_modules BEFORE npm install so npm sees the dep is already satisfied.
-pre_extract_openclaw() {
-  local install_dir="$1"
-  local openclaw_version
-  openclaw_version=$(node -e "console.log(require('${install_dir}/package.json').dependencies.openclaw)" 2>/dev/null) || openclaw_version=""
-
-  if [ -z "$openclaw_version" ]; then
-    warn "Could not determine openclaw version — skipping pre-extraction"
-    return 1
-  fi
-
-  info "Pre-extracting openclaw@${openclaw_version} with system tar (GH-503 workaround)…"
-  local tmpdir
-  tmpdir="$(mktemp -d)"
-  if npm pack "openclaw@${openclaw_version}" --pack-destination "$tmpdir" >/dev/null 2>&1; then
-    local tgz
-    tgz="$(find "$tmpdir" -maxdepth 1 -name 'openclaw-*.tgz' -print -quit)"
-    if [ -n "$tgz" ] && [ -f "$tgz" ]; then
-      if mkdir -p "${install_dir}/node_modules/openclaw" \
-        && tar xzf "$tgz" -C "${install_dir}/node_modules/openclaw" --strip-components=1; then
-        info "openclaw pre-extracted successfully"
-      else
-        warn "Failed to extract openclaw tarball"
-        rm -rf "$tmpdir"
-        return 1
-      fi
-    else
-      warn "npm pack succeeded but tarball not found"
-      rm -rf "$tmpdir"
-      return 1
-    fi
-  else
-    warn "Failed to download openclaw tarball"
-    rm -rf "$tmpdir"
-    return 1
-  fi
-  rm -rf "$tmpdir"
-}
-
 # ── Install NemoClaw CLI ─────────────────────────────────────────
 
+# Install from GitHub so the real CLI (with bin) is used. The npm registry package
+# is a stub until proper publishing is set up (see issue #71). Fixes #54 (GTC
+# Keynote / curl one-liner: "could not determine executable to run").
 info "Installing nemoclaw CLI..."
 # Clone first so we can pre-extract openclaw before npm install (GH-503).
 # npm install -g git+https://... does this internally but we can't hook
