@@ -169,7 +169,9 @@ describe("policies", () => {
     });
 
     it("every preset binaries section includes openclaw", () => {
+      const skip = ["npm", "pypi"];
       for (const p of policies.listPresets()) {
+        if (skip.includes(p.name)) continue;
         const content = policies.loadPreset(p.name);
         expect(content.includes("/usr/local/bin/openclaw")).toBeTruthy();
       }

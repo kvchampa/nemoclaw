@@ -49,7 +49,7 @@ function run(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd).slice(0, 80)}`);
     process.exit(result.status || 1);
   }
   return result;
@@ -64,7 +64,7 @@ function runInteractive(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd).slice(0, 80)}`);
     process.exit(result.status || 1);
   }
   return result;
