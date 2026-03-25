@@ -40,9 +40,11 @@ export DEBIAN_FRONTEND=noninteractive
 if ! command -v node >/dev/null 2>&1; then
   info "Installing Node.js..."
   node_setup="$(mktemp)"
+  trap 'rm -f "$node_setup"' EXIT
   curl -fsSL https://deb.nodesource.com/setup_22.x -o "$node_setup"
   sudo -E bash "$node_setup" >/dev/null 2>&1
   rm -f "$node_setup"
+  trap - EXIT
   sudo apt-get install -y -qq nodejs >/dev/null 2>&1
   info "Node.js $(node --version) installed"
 else
