@@ -173,7 +173,15 @@ jobs:
         id: changed
         run: |
           base="${{ github.event.pull_request.base.sha }}"
-          files=$(git diff --name-only --diff-filter=ACMRT "$base" -- '*.md' || true)
+          if ! files=$(git diff --name-only --diff-filter=ACMRT "$base" -- \
+            '*.md' \
+            ':(exclude)node_modules/**' \
+            ':(exclude)dist/**' \
+            ':(exclude)_build/**' \
+            ':(exclude)_deps/**'); then
+            echo "::error::Failed to compute changed markdown files from base $base"
+            exit 1
+          fi
           if [ -z "$files" ]; then
             echo "No markdown files changed."
             echo "skip=true" >> "$GITHUB_OUTPUT"
