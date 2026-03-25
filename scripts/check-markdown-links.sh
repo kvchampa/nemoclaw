@@ -77,8 +77,13 @@ check_file() {
       # Skip if nothing left after stripping anchor (was "#anchor" inside a path).
       [[ -n "$path" ]] || continue
 
-      # Resolve relative to the file's directory.
-      local resolved="$dir/$path"
+      # Resolve relative to the file's directory (handle root-relative paths).
+      local resolved
+      if [[ "$path" == /* ]]; then
+        resolved="${path#/}"
+      else
+        resolved="$dir/$path"
+      fi
 
       if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
         echo "::error file=${file},line=${line_num}::Broken link: ${target} (resolved: ${resolved})"
