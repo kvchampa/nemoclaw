@@ -34,8 +34,35 @@ def init_audit_log(log_dir: str) -> str:
     return str(audit_path)
 
 
-def append_event(log_file: str, event: dict, prev_hash: str) -> str:
-    """Append a hash-chained event to the audit log. Returns the entry hash."""
+def get_last_hash(log_file: str) -> str:
+    """Read the last entry's hash from an existing audit log, or 'genesis'."""
+    last_hash = "genesis"
+    try:
+        with open(log_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    h = record.get("hash")
+                    if h:
+                        last_hash = h
+                except json.JSONDecodeError:
+                    pass
+    except FileNotFoundError:
+        pass
+    return last_hash
+
+
+def append_event(log_file: str, event: dict, prev_hash: str | None = None) -> str:
+    """Append a hash-chained event to the audit log. Returns the entry hash.
+
+    If prev_hash is None, the last hash is read from the existing log file
+    (or 'genesis' if the file is empty/missing).
+    """
+    if prev_hash is None:
+        prev_hash = get_last_hash(log_file)
     record = {
         "timestamp": time.time(),
         "prev_hash": prev_hash,
@@ -112,6 +139,6 @@ def _cli_verify(path: str) -> int:
 
 if __name__ == "__main__":
     if len(sys.argv) < 3 or sys.argv[1] != "verify":
-        print("usage: python3 -m nemoclaw_blueprint.orchestrator.audit verify <file>")
+        print("usage: PYTHONPATH=/opt/nemoclaw-blueprint python3 -m orchestrator.audit verify <file>")
         sys.exit(2)
     sys.exit(_cli_verify(sys.argv[2]))

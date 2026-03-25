@@ -212,11 +212,9 @@ tool_policy:
     - tool: write
       paths:
         - "/var/log/**"
-        - "/var/log/nemoclaw/**"
     - tool: edit
       paths:
         - "/var/log/**"
-        - "/var/log/nemoclaw/**"
     - tool: exec
       commands:
         - chattr

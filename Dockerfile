@@ -72,7 +72,7 @@ RUN mkdir -p /var/log/nemoclaw \
     && touch /var/log/nemoclaw/audit.jsonl \
     && chown root:sandbox /var/log/nemoclaw/audit.jsonl \
     && chmod 0620 /var/log/nemoclaw/audit.jsonl \
-    && chattr +a /var/log/nemoclaw/audit.jsonl
+    && chattr +a /var/log/nemoclaw/audit.jsonl || echo "[WARN] chattr +a not supported on this filesystem" >&2
 
 WORKDIR /sandbox
 USER sandbox

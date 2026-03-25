@@ -3,15 +3,25 @@ SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All 
 SPDX-License-Identifier: Apache-2.0
 -->
 
+---
+title: Audit Logging
+description: Tamper-evident audit trail for NemoClaw gateway and orchestrator events.
+keywords:
+  - audit
+  - logging
+  - security
+  - hash chain
+---
+
 # Audit Logging
 
 NemoClaw records a tamper-evident audit trail of gateway and orchestrator events, ensuring that a sandboxed agent cannot cover its tracks by modifying log history.
 
-### Problem
+## Problem
 
 In the default configuration before this change, all logs lived under `/tmp/`, which is fully writable by the sandbox user. An agent could silently delete, truncate, or rewrite its own audit trail — making post-incident forensics unreliable.
 
-### Solution
+## Solution
 
 The fix applies three independent layers of protection:
 
@@ -21,12 +31,12 @@ The fix applies three independent layers of protection:
 
 3. **Hash chaining** — Each log entry includes a SHA-256 hash of its payload and a `prev_hash` field linking to the previous entry. Any modification breaks the chain and is detectable offline.
 
-### Verifying the audit chain
+## Verifying the audit chain
 
 Run the built-in verification command against any audit log file:
 
 ```console
-$ python3 -m nemoclaw_blueprint.orchestrator.audit verify /var/log/nemoclaw/audit.jsonl
+$ PYTHONPATH=/opt/nemoclaw-blueprint python3 -m orchestrator.audit verify /var/log/nemoclaw/audit.jsonl
 ```
 
 Output on a valid chain:
@@ -44,7 +54,7 @@ chain:   BROKEN ✗
 detail:  line 18: hash mismatch (tampering detected)
 ```
 
-### Future work
+## Future work
 
 - **Remote SIEM shipping** — Forward audit events to Splunk or Elasticsearch in real time so that even host-level compromise cannot suppress the trail.
 - **Landlock enforce mode** — Move from `best_effort` to `enforce` once the kernel compatibility matrix is validated across deployment targets.

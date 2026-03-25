@@ -279,7 +279,7 @@ echo "[gateway] openclaw gateway launched as 'gateway' user (pid $GATEWAY_PID)"
 # Initialize the audit trail with a gateway_start event
 PYTHONPATH=/opt/nemoclaw-blueprint python3 -c "
 from orchestrator.audit import append_event
-append_event('/var/log/nemoclaw/audit.jsonl', {'action': 'gateway_start', 'pid': $GATEWAY_PID}, 'genesis')
+append_event('/var/log/nemoclaw/audit.jsonl', {'action': 'gateway_start', 'pid': $GATEWAY_PID})
 " 2>/dev/null || echo "[audit] warning: could not write initial audit event"
 
 start_auto_pair
