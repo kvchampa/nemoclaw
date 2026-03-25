@@ -37,7 +37,12 @@ check_file() {
       local inc_path="${BASH_REMATCH[1]}"
       # Trim trailing whitespace.
       inc_path="${inc_path%"${inc_path##*[![:space:]]}"}"
-      local resolved="$dir/$inc_path"
+      local resolved
+      if [[ "$inc_path" == /* ]]; then
+        resolved="${inc_path#/}"
+      else
+        resolved="$dir/$inc_path"
+      fi
       if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
         echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
         broken=$((broken + 1))
