@@ -40,6 +40,7 @@ if (!API_KEY) { console.error("NVIDIA_API_KEY required"); process.exit(1); }
 
 let offset = 0;
 const activeSessions = new Map(); // chatId → message history
+const chatQueues = new Map();     // chatId → Promise chain (serializes agent calls per chat)
 
 // ── Telegram API helpers ──────────────────────────────────────────
 
@@ -194,25 +195,35 @@ async function poll() {
         // Handle /reset
         if (msg.text === "/reset") {
           activeSessions.delete(chatId);
+          chatQueues.delete(chatId);
           await sendMessage(chatId, "Session reset.", msg.message_id);
           continue;
         }
 
-        // Send typing indicator
-        await sendTyping(chatId);
+        // Queue message so only one agent call runs per chat at a time,
+        // preventing session-file lock collisions on the same session ID.
+        const messageId = msg.message_id;
+        const text = msg.text;
+        const job = async () => {
+          await sendTyping(chatId);
+          const typingInterval = setInterval(() => sendTyping(chatId), 4000);
+          try {
+            const response = await runAgentInSandbox(text, chatId);
+            clearInterval(typingInterval);
+            console.log(`[${chatId}] agent: ${response.slice(0, 100)}...`);
+            await sendMessage(chatId, response, messageId);
+          } catch (err) {
+            clearInterval(typingInterval);
+            await sendMessage(chatId, `Error: ${err.message}`, messageId);
+          }
+        };
 
-        // Keep a typing indicator going while agent runs
-        const typingInterval = setInterval(() => sendTyping(chatId), 4000);
-
-        try {
-          const response = await runAgentInSandbox(msg.text, chatId);
-          clearInterval(typingInterval);
-          console.log(`[${chatId}] agent: ${response.slice(0, 100)}...`);
-          await sendMessage(chatId, response, msg.message_id);
-        } catch (err) {
-          clearInterval(typingInterval);
-          await sendMessage(chatId, `Error: ${err.message}`, msg.message_id);
-        }
+        const prev = chatQueues.get(chatId) || Promise.resolve();
+        const next = prev.then(job, job);
+        chatQueues.set(chatId, next);
+        void next.finally(() => {
+          if (chatQueues.get(chatId) === next) chatQueues.delete(chatId);
+        });
       }
     }
   } catch (err) {
