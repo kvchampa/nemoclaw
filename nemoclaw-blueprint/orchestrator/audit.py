@@ -60,20 +60,40 @@ def append_event(log_file: str, event: dict, prev_hash: str | None = None) -> st
 
     If prev_hash is None, the last hash is read from the existing log file
     (or 'genesis' if the file is empty/missing).
-    """
-    if prev_hash is None:
-        prev_hash = get_last_hash(log_file)
-    record = {
-        "timestamp": time.time(),
-        "prev_hash": prev_hash,
-        "event": event,
-    }
-    payload = json.dumps(record, separators=(",", ":"), sort_keys=True)
-    entry_hash = _hash_payload(payload)
-    record["hash"] = entry_hash
 
-    with open(log_file, "a") as f:
+    The read-and-append is performed atomically under an exclusive file
+    lock so that concurrent writers cannot observe the same prev_hash.
+    """
+    with open(log_file, "a+") as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+        # Read prev_hash inside the lock to avoid race conditions
+        if prev_hash is None:
+            f.seek(0)
+            last_hash = "genesis"
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    h = record.get("hash")
+                    if h:
+                        last_hash = h
+                except json.JSONDecodeError:
+                    pass
+            prev_hash = last_hash
+
+        record = {
+            "timestamp": time.time(),
+            "prev_hash": prev_hash,
+            "event": event,
+        }
+        payload = json.dumps(record, separators=(",", ":"), sort_keys=True)
+        entry_hash = _hash_payload(payload)
+        record["hash"] = entry_hash
+
+        f.seek(0, 2)
         f.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
         f.flush()
         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
