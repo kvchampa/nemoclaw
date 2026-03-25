@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const startScript = readFileSync(
-  resolve(__dirname, "..", "scripts", "nemoclaw-start.sh"),
+  resolve(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh"),
   "utf8",
 );
 
 const policyYaml = readFileSync(
   resolve(
-    __dirname,
+    import.meta.dirname,
     "..",
     "nemoclaw-blueprint",
     "policies",
@@ -19,7 +19,7 @@ const policyYaml = readFileSync(
 );
 
 const onboardJs = readFileSync(
-  resolve(__dirname, "..", "bin", "lib", "onboard.js"),
+  resolve(import.meta.dirname, "..", "bin", "lib", "onboard.js"),
   "utf8",
 );
 

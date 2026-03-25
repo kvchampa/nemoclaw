@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const rootDockerfile = readFileSync(
-  resolve(__dirname, "..", "Dockerfile"),
+  resolve(import.meta.dirname, "..", "Dockerfile"),
   "utf8",
 );
 const testDockerfile = readFileSync(
-  resolve(__dirname, "Dockerfile.sandbox"),
+  resolve(import.meta.dirname, "Dockerfile.sandbox"),
   "utf8",
 );
 
