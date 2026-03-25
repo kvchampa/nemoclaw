@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-SPDX-License-Identifier: Apache-2.0
--->
-
 ---
 title: Audit Logging
 description: Tamper-evident audit trail for NemoClaw gateway and orchestrator events.
@@ -11,7 +6,22 @@ keywords:
   - logging
   - security
   - hash chain
+topics:
+  - security
+  - observability
+tags:
+  - audit-logging
+  - tamper-evident
+content type: guide
+difficulty: intermediate
+audience: operators
+status: draft
 ---
+
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
 
 # Audit Logging
 
