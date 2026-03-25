@@ -1503,6 +1503,23 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   // Forward dashboard port to the new sandbox
   runOpenshell(["forward", "start", "--background", "18789", sandboxName], { ignoreError: true });
 
+  // Fork bomb protection: OpenShell does not expose a pids-limit field in
+  // the sandbox policy, so we apply it post-creation via `docker update`.
+  // This sets a cgroup pids.max of 512 — enough for normal agent operation
+  // but low enough to prevent a prompt-injected fork bomb from exhausting
+  // the host.  Ref: https://github.com/NVIDIA/NemoClaw/issues/809
+  const pidsLimit = process.env.NEMOCLAW_PIDS_LIMIT || "512";
+  const dockerUpdate = runCapture(
+    `docker update --pids-limit ${pidsLimit} "${sandboxName}" 2>&1`,
+    { ignoreError: true }
+  );
+  if (dockerUpdate && !dockerUpdate.includes("Error")) {
+    console.log(`  ✓ Process limit set (--pids-limit ${pidsLimit})`);
+  } else {
+    console.log(`  ⓘ Could not set --pids-limit (container runtime may not support it)`);
+    console.log("    The in-sandbox ulimit fallback in nemoclaw-start.sh will apply.");
+  }
+
   // Register only after confirmed ready — prevents phantom entries
   registry.registerSandbox({
     name: sandboxName,
