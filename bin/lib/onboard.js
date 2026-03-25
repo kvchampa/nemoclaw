@@ -1398,6 +1398,14 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
   run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
   run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
+  // Exclude Python virtual environments, caches, and secrets from build context (#774)
+  for (const dir of [".venv", "__pycache__", ".pytest_cache"]) {
+    run(`rm -rf "${buildCtx}/nemoclaw-blueprint/${dir}"`, { ignoreError: true });
+  }
+  run(
+    `find "${buildCtx}/nemoclaw-blueprint" -maxdepth 1 \\( -name ".env" -o -name ".env.*" \\) -print0 | xargs -0 rm -rf -- 2>/dev/null`,
+    { ignoreError: true }
+  );
 
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
   // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
