@@ -47,6 +47,7 @@ check_file() {
         echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
         broken=$((broken + 1))
       fi
+      in_code_block=true
       continue
     fi
 
