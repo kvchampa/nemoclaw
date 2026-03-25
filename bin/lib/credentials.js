@@ -3,26 +3,54 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const readline = require("readline");
 const { execSync } = require("child_process");
 
-const CREDS_DIR = path.join(process.env.HOME || "/tmp", ".nemoclaw");
-const CREDS_FILE = path.join(CREDS_DIR, "credentials.json");
+const UNSAFE_HOME_PATHS = new Set(["/tmp", "/var/tmp", "/dev/shm", "/"]);
+
+function resolveHomeDir() {
+  const home = process.env.HOME || os.homedir();
+  if (!home || UNSAFE_HOME_PATHS.has(home)) {
+    throw new Error(
+      "Cannot determine safe home directory for credential storage. " +
+      "HOME resolves to '" + (home || "") + "' which is world-readable. " +
+      "Set the HOME environment variable to a user-owned directory."
+    );
+  }
+  return home;
+}
+
+let _credsDir = null;
+let _credsFile = null;
+
+function getCredsDir() {
+  if (!_credsDir) _credsDir = path.join(resolveHomeDir(), ".nemoclaw");
+  return _credsDir;
+}
+
+function getCredsFile() {
+  if (!_credsFile) _credsFile = path.join(getCredsDir(), "credentials.json");
+  return _credsFile;
+}
 
 function loadCredentials() {
   try {
-    if (fs.existsSync(CREDS_FILE)) {
-      return JSON.parse(fs.readFileSync(CREDS_FILE, "utf-8"));
+    const file = getCredsFile();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, "utf-8"));
     }
   } catch {}
   return {};
 }
 
 function saveCredential(key, value) {
-  fs.mkdirSync(CREDS_DIR, { recursive: true, mode: 0o700 });
+  const dir = getCredsDir();
+  const file = getCredsFile();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const creds = loadCredentials();
   creds[key] = value;
-  fs.writeFileSync(CREDS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  fs.writeFileSync(file, JSON.stringify(creds, null, 2), { mode: 0o600 });
 }
 
 function getCredential(key) {
@@ -218,9 +246,7 @@ async function ensureGithubToken() {
   console.log("");
 }
 
-module.exports = {
-  CREDS_DIR,
-  CREDS_FILE,
+const exports_ = {
   loadCredentials,
   saveCredential,
   getCredential,
@@ -229,3 +255,8 @@ module.exports = {
   ensureGithubToken,
   isRepoPrivate,
 };
+
+Object.defineProperty(exports_, "CREDS_DIR", { get: getCredsDir, enumerable: true });
+Object.defineProperty(exports_, "CREDS_FILE", { get: getCredsFile, enumerable: true });
+
+module.exports = exports_;
