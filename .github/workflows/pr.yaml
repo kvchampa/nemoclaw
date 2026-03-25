@@ -188,6 +188,8 @@ jobs:
 
       - name: Check markdown links
         if: steps.changed.outputs.skip != 'true'
+        env:
+          MD_FILES: ${{ steps.changed.outputs.files }}
         run: |
           # shellcheck disable=SC2086
-          bash scripts/check-markdown-links.sh ${{ steps.changed.outputs.files }}
+          bash scripts/check-markdown-links.sh $MD_FILES
