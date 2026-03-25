@@ -1,10 +1,15 @@
-## Audit Logging
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# Audit Logging
 
 NemoClaw records a tamper-evident audit trail of gateway and orchestrator events, ensuring that a sandboxed agent cannot cover its tracks by modifying log history.
 
 ### Problem
 
-In the default configuration prior to this change, all logs lived under `/tmp/`, which is fully writable by the sandbox user. An agent could silently delete, truncate, or rewrite its own audit trail — making post-incident forensics unreliable.
+In the default configuration before this change, all logs lived under `/tmp/`, which is fully writable by the sandbox user. An agent could silently delete, truncate, or rewrite its own audit trail — making post-incident forensics unreliable.
 
 ### Solution
 
@@ -20,20 +25,20 @@ The fix applies three independent layers of protection:
 
 Run the built-in verification command against any audit log file:
 
-```bash
-python3 -m nemoclaw_blueprint.orchestrator.audit verify /var/log/nemoclaw/audit.jsonl
+```console
+$ python3 -m nemoclaw_blueprint.orchestrator.audit verify /var/log/nemoclaw/audit.jsonl
 ```
 
 Output on a valid chain:
 
-```
+```text
 entries: 42
 chain:   valid ✓
 ```
 
 If tampering is detected, the tool reports the exact line where the chain broke:
 
-```
+```text
 entries: 17
 chain:   BROKEN ✗
 detail:  line 18: hash mismatch (tampering detected)

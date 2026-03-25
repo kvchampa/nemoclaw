@@ -9,6 +9,7 @@ the previous entry, so any modification or deletion breaks the chain
 and is detectable via `verify_chain`.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -45,7 +46,10 @@ def append_event(log_file: str, event: dict, prev_hash: str) -> str:
     record["hash"] = entry_hash
 
     with open(log_file, "a") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         f.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+        f.flush()
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     return entry_hash
 
@@ -101,13 +105,13 @@ def _cli_verify(path: str) -> int:
         print("chain:   valid ✓")
         return 0
     else:
-        print(f"chain:   BROKEN ✗")
+        print("chain:   BROKEN ✗")
         print(f"detail:  {err}")
         return 1
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3 or sys.argv[1] != "verify":
-        print(f"usage: python3 -m nemoclaw_blueprint.orchestrator.audit verify <file>")
+        print("usage: python3 -m nemoclaw_blueprint.orchestrator.audit verify <file>")
         sys.exit(2)
     sys.exit(_cli_verify(sys.argv[2]))
