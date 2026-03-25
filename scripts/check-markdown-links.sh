@@ -31,6 +31,20 @@ check_file() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     line_num=$((line_num + 1))
 
+    # Check MyST include directives before the code-block toggle, since
+    # ```{include} starts with ``` and would otherwise be swallowed.
+    if [[ "$line" =~ ^\`\`\`\{include\}[[:space:]]+(.+)$ ]]; then
+      local inc_path="${BASH_REMATCH[1]}"
+      # Trim trailing whitespace.
+      inc_path="${inc_path%"${inc_path##*[![:space:]]}"}"
+      local resolved="$dir/$inc_path"
+      if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
+        echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
+        broken=$((broken + 1))
+      fi
+      continue
+    fi
+
     # Track fenced code blocks (``` or ~~~) to skip links inside them.
     if [[ "$line" =~ ^[[:space:]]*((\`\`\`)|(\~\~\~)) ]]; then
       if [[ "$in_code_block" == true ]]; then
@@ -71,18 +85,6 @@ check_file() {
         broken=$((broken + 1))
       fi
     done
-
-    # Extract MyST include directives: ```{include} path
-    if [[ "$line" =~ ^\`\`\`\{include\}[[:space:]]+(.+)$ ]]; then
-      local inc_path="${BASH_REMATCH[1]}"
-      # Trim trailing whitespace.
-      inc_path="${inc_path%"${inc_path##*[![:space:]]}"}"
-      local resolved="$dir/$inc_path"
-      if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
-        echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
-        broken=$((broken + 1))
-      fi
-    fi
   done < "$REPO_ROOT/$file"
 }
 
