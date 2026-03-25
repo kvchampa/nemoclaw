@@ -27,36 +27,39 @@ check_file() {
   dir="$(dirname "$file")"
   local line_num=0
   local in_code_block=false
+  local fence_marker=""
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line_num=$((line_num + 1))
 
-    # Check MyST include directives before the code-block toggle, since
-    # ```{include} starts with ``` and would otherwise be swallowed.
-    if [[ "$line" =~ ^\`\`\`\{include\}[[:space:]]+(.+)$ ]]; then
-      local inc_path="${BASH_REMATCH[1]}"
-      # Trim trailing whitespace.
-      inc_path="${inc_path%"${inc_path##*[![:space:]]}"}"
-      local resolved
-      if [[ "$inc_path" == /* ]]; then
-        resolved="${inc_path#/}"
-      else
-        resolved="$dir/$inc_path"
-      fi
-      if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
-        echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
-        broken=$((broken + 1))
-      fi
-      in_code_block=true
-      continue
-    fi
-
-    # Track fenced code blocks (``` or ~~~) to skip links inside them.
-    if [[ "$line" =~ ^[[:space:]]*((\`\`\`)|(\~\~\~)) ]]; then
+    # Track fenced code blocks (``` or ~~~), matching opener to closer.
+    # A closing fence must use the same character and be at least as long.
+    if [[ "$line" =~ ^[[:space:]]*((\`\`\`+)|(\~\~\~+)) ]]; then
+      local marker="${BASH_REMATCH[1]}"
       if [[ "$in_code_block" == true ]]; then
-        in_code_block=false
+        if [[ "${marker:0:1}" == "${fence_marker:0:1}" && ${#marker} -ge ${#fence_marker} ]]; then
+          in_code_block=false
+          fence_marker=""
+        fi
       else
+        # Check for MyST include directives (```{include} path).
+        if [[ "$line" =~ ^[[:space:]]*\`\`\`\{include\}[[:space:]]+(.+)$ ]]; then
+          local inc_path="${BASH_REMATCH[1]}"
+          # Trim trailing whitespace.
+          inc_path="${inc_path%"${inc_path##*[![:space:]]}"}"
+          local resolved
+          if [[ "$inc_path" == /* ]]; then
+            resolved="${inc_path#/}"
+          else
+            resolved="$dir/$inc_path"
+          fi
+          if [[ ! -e "$REPO_ROOT/$resolved" ]]; then
+            echo "::error file=${file},line=${line_num}::Broken include: ${inc_path} (resolved: ${resolved})"
+            broken=$((broken + 1))
+          fi
+        fi
         in_code_block=true
+        fence_marker="$marker"
       fi
       continue
     fi
