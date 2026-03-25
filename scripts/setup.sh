@@ -186,10 +186,17 @@ info "Building and creating NemoClaw sandbox (this takes a few minutes on first 
 # Stage a clean build context (openshell doesn't honor .dockerignore)
 BUILD_CTX="$(mktemp -d)"
 cp "$REPO_DIR/Dockerfile" "$BUILD_CTX/"
-cp -r "$REPO_DIR/nemoclaw" "$BUILD_CTX/nemoclaw"
-cp -r "$REPO_DIR/nemoclaw-blueprint" "$BUILD_CTX/nemoclaw-blueprint"
-cp -r "$REPO_DIR/scripts" "$BUILD_CTX/scripts"
-rm -rf "$BUILD_CTX/nemoclaw/node_modules"
+mkdir -p "$BUILD_CTX/nemoclaw"
+cp "$REPO_DIR/nemoclaw/package.json" "$BUILD_CTX/nemoclaw/"
+cp "$REPO_DIR/nemoclaw/package-lock.json" "$BUILD_CTX/nemoclaw/"
+cp "$REPO_DIR/nemoclaw/tsconfig.json" "$BUILD_CTX/nemoclaw/"
+cp "$REPO_DIR/nemoclaw/openclaw.plugin.json" "$BUILD_CTX/nemoclaw/"
+cp -r "$REPO_DIR/nemoclaw/src" "$BUILD_CTX/nemoclaw/src"
+mkdir -p "$BUILD_CTX/nemoclaw-blueprint"
+cp "$REPO_DIR/nemoclaw-blueprint/blueprint.yaml" "$BUILD_CTX/nemoclaw-blueprint/"
+cp -r "$REPO_DIR/nemoclaw-blueprint/policies" "$BUILD_CTX/nemoclaw-blueprint/policies"
+mkdir -p "$BUILD_CTX/scripts"
+cp "$REPO_DIR/scripts/nemoclaw-start.sh" "$BUILD_CTX/scripts/"
 
 # Capture full output to a temp file so we can filter for display but still
 # detect failures. The raw log is kept on failure for debugging.

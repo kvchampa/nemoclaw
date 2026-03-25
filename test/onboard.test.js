@@ -11,12 +11,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildSandboxConfigSyncScript,
   getFutureShellPathHint,
-  getInstalledOpenshellVersion,
   getSandboxInferenceConfig,
+  getInstalledOpenshellVersion,
   getStableGatewayImageRef,
   patchStagedDockerfile,
   writeSandboxConfigSyncFile,
 } from "../bin/lib/onboard";
+import { stageOptimizedSandboxBuildContext } from "../bin/lib/sandbox-build-context";
 
 describe("onboard helpers", () => {
   it("builds a sandbox sync script that only writes nemoclaw config", () => {
@@ -170,6 +171,25 @@ describe("onboard helpers", () => {
       const scriptFile = writeSandboxConfigSyncFile("echo test", tmpDir, 1234);
       expect(scriptFile).toBe(path.join(tmpDir, "nemoclaw-sync-1234.sh"));
       expect(fs.readFileSync(scriptFile, "utf8")).toBe("echo test\n");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stages only the files required to build the sandbox image", () => {
+    const repoRoot = path.join(import.meta.dirname, "..");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-context-"));
+
+    try {
+      const { buildCtx, stagedDockerfile } = stageOptimizedSandboxBuildContext(repoRoot, tmpDir);
+
+      expect(stagedDockerfile).toBe(path.join(buildCtx, "Dockerfile"));
+      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "package-lock.json"))).toBe(true);
+      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "src"))).toBe(true);
+      expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
+      expect(fs.existsSync(path.join(buildCtx, "scripts", "nemoclaw-start.sh"))).toBe(true);
+      expect(fs.existsSync(path.join(buildCtx, "scripts", "setup.sh"))).toBe(false);
+      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "node_modules"))).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

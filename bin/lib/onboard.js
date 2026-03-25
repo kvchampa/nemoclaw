@@ -10,6 +10,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, run, runCapture, shellQuote } = require("./runner");
+const { stageOptimizedSandboxBuildContext } = require("./sandbox-build-context");
 const {
   getDefaultOllamaModel,
   getBootstrapOllamaModelOptions,
@@ -1390,14 +1391,8 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
     registry.removeSandbox(sandboxName);
   }
 
-  // Stage build context
-  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
-  const stagedDockerfile = path.join(buildCtx, "Dockerfile");
-  fs.copyFileSync(path.join(ROOT, "Dockerfile"), stagedDockerfile);
-  run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
-  run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
-  run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
-  run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
+  // Stage only the files the Docker build actually consumes so uploads stay small.
+  const { buildCtx, stagedDockerfile } = stageOptimizedSandboxBuildContext(ROOT);
 
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
   // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
