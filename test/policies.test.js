@@ -5,11 +5,13 @@ import assert from "node:assert/strict";
 import { describe, it, expect } from "vitest";
 import policies from "../bin/lib/policies";
 
+const expectedPresets = ["discord", "docker", "huggingface", "jira", "local-inference", "npm", "outlook", "pypi", "slack", "telegram"];
+
 describe("policies", () => {
   describe("listPresets", () => {
-    it("returns all 9 presets", () => {
+    it(`returns all ${expectedPresets.length} presets`, () => {
       const presets = policies.listPresets();
-      expect(presets.length).toBe(9);
+      expect(presets.length).toBe(expectedPresets.length);
     });
 
     it("each preset has name and description", () => {
@@ -21,8 +23,7 @@ describe("policies", () => {
 
     it("returns expected preset names", () => {
       const names = policies.listPresets().map((p) => p.name).sort();
-      const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
-      expect(names).toEqual(expected);
+      expect(names).toEqual(expectedPresets);
     });
   });
 
@@ -101,6 +102,33 @@ describe("policies", () => {
     it("shell-quotes sandbox name", () => {
       const cmd = policies.buildPolicyGetCommand("my-assistant");
       expect(cmd).toBe("openshell policy get --full 'my-assistant' 2>/dev/null");
+    });
+  });
+
+  describe("local-inference preset", () => {
+    it("loads and contains host.openshell.internal", () => {
+      const content = policies.loadPreset("local-inference");
+      expect(content).toBeTruthy();
+      const hosts = policies.getPresetEndpoints(content);
+      expect(hosts.includes("host.openshell.internal")).toBeTruthy();
+    });
+
+    it("allows Ollama port 11434 and vLLM port 8000", () => {
+      const content = policies.loadPreset("local-inference");
+      expect(content.includes("port: 11434")).toBe(true);
+      expect(content.includes("port: 8000")).toBe(true);
+    });
+
+    it("has a binaries section", () => {
+      const content = policies.loadPreset("local-inference");
+      expect(content.includes("binaries:")).toBe(true);
+    });
+
+    it("extracts valid network_policies entries", () => {
+      const content = policies.loadPreset("local-inference");
+      const entries = policies.extractPresetEntries(content);
+      expect(entries).toBeTruthy();
+      expect(entries.includes("local_inference")).toBe(true);
     });
   });
 

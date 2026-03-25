@@ -96,8 +96,10 @@ async function setup() {
 }
 
 async function setupSpark() {
-  // setup-spark.sh configures Docker cgroups — it does not use NVIDIA_API_KEY.
-  run(`sudo bash "${SCRIPTS}/setup-spark.sh"`);
+  await ensureApiKey();
+  run(`sudo -E bash "${SCRIPTS}/setup-spark.sh"`, {
+    env: { NVIDIA_API_KEY: process.env.NVIDIA_API_KEY },
+  });
 }
 
 async function deploy(instanceName) {

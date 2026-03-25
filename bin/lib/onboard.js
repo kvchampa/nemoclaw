@@ -1998,10 +1998,18 @@ async function setupOpenclaw(sandboxName, model, provider) {
 
 // ── Step 7: Policy presets ───────────────────────────────────────
 
-async function setupPolicies(sandboxName) {
+async function setupPolicies(sandboxName, provider = null) {
   step(7, 7, "Policy presets");
 
   const suggestions = ["pypi", "npm"];
+
+  // Auto-detect local inference — sandbox needs host gateway egress
+  const sandbox = registry.getSandbox(sandboxName);
+  const sandboxProvider = provider || (sandbox ? sandbox.provider : null);
+  if (sandboxProvider === "ollama-local" || sandboxProvider === "vllm-local") {
+    suggestions.push("local-inference");
+    console.log(`  Auto-detected: ${sandboxProvider} → suggesting local-inference preset`);
+  }
 
   // Auto-detect based on env tokens
   if (getCredential("TELEGRAM_BOT_TOKEN")) {
@@ -2192,7 +2200,7 @@ async function onboard(opts = {}) {
     registry.updateSandbox(sandboxName, { nimContainer });
   }
   await setupOpenclaw(sandboxName, model, provider);
-  await setupPolicies(sandboxName);
+  await setupPolicies(sandboxName, provider);
   printDashboard(sandboxName, model, provider, nimContainer);
 }
 
