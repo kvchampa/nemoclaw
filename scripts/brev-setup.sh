@@ -39,9 +39,13 @@ export DEBIAN_FRONTEND=noninteractive
 # --- 0. Node.js (needed for services) ---
 if ! command -v node >/dev/null 2>&1; then
   info "Installing Node.js..."
+  NODESOURCE_URL="https://deb.nodesource.com/setup_22.x"
+  NODESOURCE_SHA256="575583bbac2fccc0b5edd0dbc03e222d9f9dc8d724da996d22754d6411104fd1"
   node_setup="$(mktemp)"
   trap 'rm -f "$node_setup"' EXIT
-  curl -fsSL https://deb.nodesource.com/setup_22.x -o "$node_setup"
+  curl -fsSL "$NODESOURCE_URL" -o "$node_setup"
+  echo "$NODESOURCE_SHA256  $node_setup" | shasum -a 256 -c - >/dev/null \
+    || fail "NodeSource installer checksum mismatch — expected $NODESOURCE_SHA256"
   sudo -E bash "$node_setup" >/dev/null 2>&1
   rm -f "$node_setup"
   trap - EXIT
