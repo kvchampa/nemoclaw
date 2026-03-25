@@ -213,15 +213,16 @@ if [ "$(id -u)" -ne 0 ]; then
 
   # In non-root mode, detach gateway stdout/stderr from the sandbox-create
   # stream so openshell sandbox create can return once the container is ready.
-  touch /tmp/gateway.log
-  chmod 600 /tmp/gateway.log
+  touch /var/log/nemoclaw/gateway.log 2>/dev/null || touch /tmp/gateway.log
+  GATEWAY_LOG="$([ -w /var/log/nemoclaw/gateway.log ] && echo /var/log/nemoclaw/gateway.log || echo /tmp/gateway.log)"
+  chmod 600 "$GATEWAY_LOG"
 
   # Separate log for auto-pair in non-root mode as well.
   touch /tmp/auto-pair.log
   chmod 600 /tmp/auto-pair.log
 
   # Start gateway in background, auto-pair, then wait
-  nohup "$OPENCLAW" gateway run >/tmp/gateway.log 2>&1 &
+  nohup "$OPENCLAW" gateway run >"$GATEWAY_LOG" 2>&1 &
   GATEWAY_PID=$!
   echo "[gateway] openclaw gateway launched (pid $GATEWAY_PID)"
   start_auto_pair
@@ -244,9 +245,10 @@ if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
 fi
 
 # SECURITY: Protect gateway log from sandbox user tampering
-touch /tmp/gateway.log
-chown gateway:gateway /tmp/gateway.log
-chmod 600 /tmp/gateway.log
+mkdir -p /var/log/nemoclaw
+touch /var/log/nemoclaw/gateway.log
+chown gateway:gateway /var/log/nemoclaw/gateway.log
+chmod 600 /var/log/nemoclaw/gateway.log
 
 # Separate log for auto-pair so sandbox user can write to it
 touch /tmp/auto-pair.log
@@ -270,9 +272,15 @@ done
 # SECURITY: The sandbox user cannot kill this process because it runs
 # under a different UID. The fake-HOME attack no longer works because
 # the agent cannot restart the gateway with a tampered config.
-nohup gosu gateway "$OPENCLAW" gateway run >/tmp/gateway.log 2>&1 &
+nohup gosu gateway "$OPENCLAW" gateway run >/var/log/nemoclaw/gateway.log 2>&1 &
 GATEWAY_PID=$!
 echo "[gateway] openclaw gateway launched as 'gateway' user (pid $GATEWAY_PID)"
+
+# Initialize the audit trail with a gateway_start event
+PYTHONPATH=/opt/nemoclaw-blueprint python3 -c "
+from orchestrator.audit import append_event
+append_event('/var/log/nemoclaw/audit.jsonl', {'action': 'gateway_start', 'pid': $GATEWAY_PID}, 'genesis')
+" 2>/dev/null || echo "[audit] warning: could not write initial audit event"
 
 start_auto_pair
 print_dashboard_urls
