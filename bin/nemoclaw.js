@@ -34,7 +34,7 @@ const policies = require("./lib/policies");
 // ── Global commands ──────────────────────────────────────────────
 
 const GLOBAL_COMMANDS = new Set([
-  "onboard", "list", "deploy", "setup", "setup-spark",
+  "onboard", "list", "deploy", "setup", "setup-spark", "setup-apple",
   "start", "stop", "status", "debug", "uninstall",
   "help", "--help", "-h", "--version", "-v",
 ]);
@@ -100,6 +100,10 @@ async function setupSpark() {
   run(`sudo bash "${SCRIPTS}/setup-spark.sh"`);
 }
 
+async function setupApple() {
+  run(`bash "${SCRIPTS}/setup-apple.sh"`);
+}
+
 async function deploy(instanceName) {
   if (!instanceName) {
     console.error("  Usage: nemoclaw deploy <instance-name>");
@@ -108,6 +112,11 @@ async function deploy(instanceName) {
     console.error("    nemoclaw deploy my-gpu-box");
     console.error("    nemoclaw deploy nemoclaw-prod");
     console.error("    nemoclaw deploy nemoclaw-test");
+    process.exit(1);
+  }
+  // Validate instance name to prevent shell injection
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(instanceName)) {
+    console.error("  Invalid instance name. Use alphanumeric characters, dots, hyphens, and underscores.");
     process.exit(1);
   }
   await ensureApiKey();
@@ -403,6 +412,7 @@ function help() {
   ${G}Getting Started:${R}
     ${B}nemoclaw onboard${R}                 Configure inference endpoint and credentials
     nemoclaw setup-spark             Set up on DGX Spark ${D}(fixes cgroup v2 + Docker)${R}
+    nemoclaw setup-apple             Set up on macOS / Apple Silicon
 
   ${G}Sandbox Management:${R}
     ${B}nemoclaw list${R}                    List all sandboxes
@@ -458,6 +468,7 @@ const [cmd, ...args] = process.argv.slice(2);
       case "onboard":     await onboard(args); break;
       case "setup":       await setup(); break;
       case "setup-spark": await setupSpark(); break;
+      case "setup-apple": await setupApple(); break;
       case "deploy":      await deploy(args[0]); break;
       case "start":       await start(); break;
       case "stop":        stop(); break;
