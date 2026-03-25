@@ -7,9 +7,9 @@ import policies from "../bin/lib/policies";
 
 describe("policies", () => {
   describe("listPresets", () => {
-    it("returns all 9 presets", () => {
+    it("returns all 10 presets", () => {
       const presets = policies.listPresets();
-      expect(presets.length).toBe(9);
+      assert.equal(presets.length, 10);
     });
 
     it("each preset has name and description", () => {
@@ -21,8 +21,8 @@ describe("policies", () => {
 
     it("returns expected preset names", () => {
       const names = policies.listPresets().map((p) => p.name).sort();
-      const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
-      expect(names).toEqual(expected);
+      const expected = ["discord", "docker", "github", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
+      assert.deepEqual(names, expected);
     });
   });
 
@@ -57,6 +57,15 @@ describe("policies", () => {
       const content = policies.loadPreset("telegram");
       const hosts = policies.getPresetEndpoints(content);
       expect(hosts).toEqual(["api.telegram.org"]);
+    });
+
+    it("extracts hosts from github preset", () => {
+      const content = policies.loadPreset("github");
+      const hosts = policies.getPresetEndpoints(content);
+      assert.ok(hosts.includes("api.github.com"));
+      assert.ok(hosts.includes("github.com"));
+      assert.ok(hosts.includes("raw.githubusercontent.com"));
+      assert.ok(hosts.includes("uploads.github.com"));
     });
 
     it("every preset has at least one endpoint", () => {
