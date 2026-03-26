@@ -202,3 +202,20 @@ network_policies:
           - allow: { method: GET, path: "/**" }
     binaries:
       - { path: /usr/local/bin/node }
+
+# ── Audit log tamper prevention ────────────────────────────────
+# Defense-in-depth: even if filesystem permissions or chattr are
+# somehow bypassed, the tool policy blocks the agent from writing
+# to log paths or running commands that strip file attributes.
+tool_policy:
+  deny:
+    - tool: write
+      paths:
+        - "/var/log/**"
+    - tool: edit
+      paths:
+        - "/var/log/**"
+    - tool: exec
+      commands:
+        - chattr
+        - truncate
