@@ -280,6 +280,18 @@ write_auth_profile
 export CHAT_UI_URL PUBLIC_PORT
 fix_openclaw_config
 
+# ── Non-root fallback ──────────────────────────────────────────
+# OpenShell runs containers with --security-opt=no-new-privileges, which
+# blocks gosu's setuid syscall. When we're not root, skip privilege
+# separation and run everything as the current user (sandbox).
+# Gateway process isolation is not available in this mode.
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[gateway] Running as non-root (uid=$(id -u)) — privilege separation disabled"
+  export HOME=/sandbox
+  if ! verify_config_integrity; then
+    echo "[SECURITY WARNING] Config integrity check failed — proceeding anyway (non-root mode)"
+  fi
+
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
     exec "${NEMOCLAW_CMD[@]}"
   fi

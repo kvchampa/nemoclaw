@@ -132,13 +132,20 @@ RUN openclaw doctor --fix > /dev/null 2>&1 || true \
 # Lock openclaw.json via DAC: chown to root so the sandbox user cannot modify
 # it at runtime.  This works regardless of Landlock enforcement status.
 # Ref: https://github.com/NVIDIA/NemoClaw/issues/514
+#
+# Pin config hash FIRST — the directory is locked to 0555 afterwards and
+# no further writes are possible.
+# hadolint ignore=DL3002
+USER root
+RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
+    && chmod 444 /sandbox/.openclaw/.config-hash \
+    && chown root:root /sandbox/.openclaw/.config-hash
+
 # Lock the entire .openclaw directory tree.
-# SECURITY: chmod 755 (not 1777) — the sandbox user can READ but not WRITE
+# SECURITY: chmod 555 — the sandbox user can READ but not WRITE
 # to this directory. This prevents the agent from replacing symlinks
 # (e.g., pointing /sandbox/.openclaw/hooks to an attacker-controlled path).
 # The writable state lives in .openclaw-data, reached via the symlinks.
-# hadolint ignore=DL3002
-USER root
 RUN chown root:root /sandbox/.openclaw \
     && find /sandbox/.openclaw -mindepth 1 -maxdepth 1 -exec chown -h root:root {} + \
     && chmod 0555 /sandbox/.openclaw \
@@ -146,13 +153,6 @@ RUN chown root:root /sandbox/.openclaw \
     && chown -R sandbox:sandbox /sandbox/.openclaw-data/workspace \
                                 /sandbox/.openclaw-data/agents
 USER sandbox
-
-# Pin config hash at build time so the entrypoint can verify integrity.
-# Prevents the agent from creating a copy with a tampered config and
-# restarting the gateway pointing at it.
-RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
-    && chmod 444 /sandbox/.openclaw/.config-hash \
-    && chown root:root /sandbox/.openclaw/.config-hash
 
 # Entrypoint runs as root to start the gateway as the gateway user,
 # then drops to sandbox for agent commands. See nemoclaw-start.sh.
