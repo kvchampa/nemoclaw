@@ -4,7 +4,10 @@
 // NIM container management — pull, start, stop, health-check NIM images.
 
 const { run, runCapture, shellQuote } = require("./runner");
+const registry = require("./registry");
 const nimImages = require("./nim-images.json");
+
+const DEFAULT_NIM_PORT = 8000;
 
 function containerName(sandboxName) {
   return `nemoclaw-nim-${sandboxName}`;
@@ -125,13 +128,17 @@ function pullNimImage(model) {
   return image;
 }
 
-function startNimContainer(sandboxName, model, port = 8000) {
+function startNimContainer(sandboxName, model, port = DEFAULT_NIM_PORT) {
+  const safePort = normalizeNimPort(port);
   const name = containerName(sandboxName);
-  return startNimContainerByName(name, model, port);
+  const container = startNimContainerByName(name, model, safePort);
+  registry.updateSandbox(sandboxName, { nimPort: safePort });
+  return container;
 }
 
-function startNimContainerByName(name, model, port = 8000) {
+function startNimContainerByName(name, model, port = DEFAULT_NIM_PORT) {
   const image = getImageForModel(model);
+  const safePort = normalizeNimPort(port);
   if (!image) {
     console.error(`  Unknown model: ${model}`);
     process.exit(1);
@@ -143,15 +150,15 @@ function startNimContainerByName(name, model, port = 8000) {
 
   console.log(`  Starting NIM container: ${name}`);
   run(
-    `docker run -d --gpus all -p ${Number(port)}:8000 --name ${qn} --shm-size 16g ${shellQuote(image)}`
+    `docker run -d --gpus all -p ${safePort}:8000 --name ${qn} --shm-size 16g ${shellQuote(image)}`
   );
   return name;
 }
 
-function waitForNimHealth(port = 8000, timeout = 300) {
+function waitForNimHealth(port = DEFAULT_NIM_PORT, timeout = 300) {
   const start = Date.now();
   const _interval = 5000;
-  const safePort = Number(port);
+  const safePort = normalizeNimPort(port);
   console.log(`  Waiting for NIM health on port ${safePort} (timeout: ${timeout}s)...`);
 
   while ((Date.now() - start) / 1000 < timeout) {
@@ -183,12 +190,25 @@ function stopNimContainerByName(name) {
   run(`docker rm ${qn} 2>/dev/null || true`, { ignoreError: true });
 }
 
-function nimStatus(sandboxName) {
-  const name = containerName(sandboxName);
-  return nimStatusByName(name);
+function normalizeNimPort(value) {
+  const port = Number(value);
+  if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
+  return DEFAULT_NIM_PORT;
 }
 
-function nimStatusByName(name) {
+function getNimPortForSandbox(sandboxName) {
+  const sandbox = registry.getSandbox(sandboxName);
+  return normalizeNimPort(sandbox && sandbox.nimPort);
+}
+
+function nimStatus(sandboxName) {
+  const name = containerName(sandboxName);
+  const port = getNimPortForSandbox(sandboxName);
+  return nimStatusByName(name, port);
+}
+
+function nimStatusByName(name, port = DEFAULT_NIM_PORT) {
+  const safePort = normalizeNimPort(port);
   try {
     const state = runCapture(
       `docker inspect --format '{{.State.Status}}' ${shellQuote(name)} 2>/dev/null`,
@@ -198,7 +218,7 @@ function nimStatusByName(name) {
 
     let healthy = false;
     if (state === "running") {
-      const health = runCapture(`curl -sf http://localhost:8000/v1/models 2>/dev/null`, {
+      const health = runCapture(`curl -sf http://localhost:${safePort}/v1/models 2>/dev/null`, {
         ignoreError: true,
       });
       healthy = !!health;
@@ -211,7 +231,9 @@ function nimStatusByName(name) {
 
 module.exports = {
   containerName,
+  DEFAULT_NIM_PORT,
   getImageForModel,
+  getNimPortForSandbox,
   listModels,
   detectGpu,
   pullNimImage,
