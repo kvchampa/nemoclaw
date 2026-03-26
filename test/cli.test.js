@@ -97,6 +97,19 @@ describe("CLI dispatch", () => {
     expect(r.out.includes("nemoclaw debug")).toBeTruthy();
   });
 
+  it("deploy rejects invalid instance names before credential prompts", () => {
+    const r = run("deploy \"foo;bar\"");
+    expect(r.code).toBe(1);
+    expect(r.out.includes("Invalid instance name")).toBeTruthy();
+    expect(r.out.includes("NVIDIA API Key required")).toBeFalsy();
+  });
+
+  it("deploy rejects command-substitution instance names", () => {
+    const r = run("deploy '$(id)'");
+    expect(r.code).toBe(1);
+    expect(r.out.includes("Invalid instance name")).toBeTruthy();
+    expect(r.out.includes("NVIDIA API Key required")).toBeFalsy();
+  });
   it("passes --follow through to openshell logs", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-logs-follow-"));
     const localBin = path.join(home, "bin");
