@@ -52,7 +52,7 @@ function getPresetEndpoints(content) {
   const regex = /host:\s*([^\s,}]+)/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
-    hosts.push(match[1]);
+    hosts.push(match[1].replace(/^["']|["']$/g, ""));
   }
   return hosts;
 }
@@ -174,6 +174,12 @@ function applyPreset(sandboxName, presetName) {
   } else {
     // No current policy at all
     merged = "version: 1\n\nnetwork_policies:\n" + presetEntries;
+  }
+
+  // Disclose the egress endpoints being added so the operator can audit
+  const endpoints = getPresetEndpoints(presetContent);
+  if (endpoints.length > 0) {
+    console.log(`  Widening sandbox egress — adding: ${endpoints.join(", ")}`);
   }
 
   // Write temp file and apply
