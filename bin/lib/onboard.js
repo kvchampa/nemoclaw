@@ -1256,6 +1256,36 @@ async function preflight() {
     console.log("  Add that export to your shell profile, or open a new terminal before running openshell directly.");
   }
 
+  // Enforce min_openshell_version from blueprint.yaml
+  const installedVersion = getInstalledOpenshellVersion();
+  if (installedVersion) {
+    const blueprintPath = path.join(ROOT, "nemoclaw-blueprint", "blueprint.yaml");
+    if (fs.existsSync(blueprintPath)) {
+      const blueprintRaw = fs.readFileSync(blueprintPath, "utf-8");
+      const minMatch = blueprintRaw.match(/min_openshell_version:\s*"([^"]+)"/);
+      if (minMatch) {
+        const minRequired = minMatch[1];
+        const vGte = (a, b) => {
+          const pa = a.split(".").map(Number);
+          const pb = b.split(".").map(Number);
+          for (let i = 0; i < 3; i++) {
+            if ((pa[i] || 0) > (pb[i] || 0)) return true;
+            if ((pa[i] || 0) < (pb[i] || 0)) return false;
+          }
+          return true;
+        };
+        if (!vGte(installedVersion, minRequired)) {
+          console.error("");
+          console.error(`  !! OpenShell ${installedVersion} is below the minimum required version ${minRequired}.`);
+          console.error(`     Please upgrade: https://github.com/NVIDIA/OpenShell/releases`);
+          console.error("");
+          process.exit(1);
+        }
+        console.log(`  ✓ openshell version ${installedVersion} meets minimum ${minRequired}`);
+      }
+    }
+  }
+
   // Clean up stale NemoClaw session before checking ports.
   // A previous onboard run may have left the gateway container and port
   // forward running.  If a NemoClaw-owned gateway is still present, tear
@@ -1364,13 +1394,23 @@ async function startGatewayWithOptions(_gpu, { exitOnFailure = true } = {}) {
   // allocate GPUs. See: https://build.nvidia.com/spark/nemoclaw/instructions
   const gatewayEnv = {};
   const openshellVersion = getInstalledOpenshellVersion();
-  const stableGatewayImage = openshellVersion
-    ? `ghcr.io/nvidia/openshell/cluster:${openshellVersion}`
-    : null;
-  if (stableGatewayImage && openshellVersion) {
-    gatewayEnv.OPENSHELL_CLUSTER_IMAGE = stableGatewayImage;
-    gatewayEnv.IMAGE_TAG = openshellVersion;
-    console.log(`  Using pinned OpenShell gateway image: ${stableGatewayImage}`);
+  const versionOutput = String(runCapture("openshell -V", { ignoreError: true })).trim();
+  const isDevBuild = versionOutput.includes("-dev") || versionOutput.includes("+");
+  if (isDevBuild) {
+    // Dev/locally-built OpenShell — use the local image tag that
+    // `mise run cluster` / `docker-build-image.sh` produces.
+    // The bootstrap's ensure_image() will find it locally and skip GHCR pull.
+    gatewayEnv.OPENSHELL_CLUSTER_IMAGE = "openshell/cluster:dev";
+    console.log(`  Using dev-build OpenShell (${openshellVersion}) — gateway image: openshell/cluster:dev`);
+  } else {
+    const stableGatewayImage = openshellVersion
+      ? `ghcr.io/nvidia/openshell/cluster:${openshellVersion}`
+      : null;
+    if (stableGatewayImage && openshellVersion) {
+      gatewayEnv.OPENSHELL_CLUSTER_IMAGE = stableGatewayImage;
+      gatewayEnv.IMAGE_TAG = openshellVersion;
+      console.log(`  Using pinned OpenShell gateway image: ${stableGatewayImage}`);
+    }
   }
 
   const startResult = runOpenshell(["gateway", "start", ...gwArgs], { ignoreError: true, env: gatewayEnv });
@@ -1474,6 +1514,7 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
   run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
   run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
+  run(`cp -r "${path.join(ROOT, "patches")}" "${buildCtx}/patches"`);
   run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
   run(`bash "${buildCtx}/scripts/clean-staged-tree.sh" "${buildCtx}/nemoclaw-blueprint"`, { ignoreError: true });
 
@@ -1496,7 +1537,10 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   // also strips any Authorization headers sent by the sandbox client.
   // See: crates/openshell-sandbox/src/proxy.rs (header stripping),
   //      crates/openshell-router/src/backend.rs (server-side auth injection).
-  const envArgs = [formatEnvAssignment("CHAT_UI_URL", chatUiUrl)];
+  const envArgs = [
+    formatEnvAssignment("CHAT_UI_URL", chatUiUrl),
+    formatEnvAssignment("OPENCLAW_CONFIG_OVERRIDES_FILE", "/sandbox/.openclaw-data/config-overrides.json5"),
+  ];
   const sandboxEnv = { ...process.env };
   delete sandboxEnv.NVIDIA_API_KEY;
   const discordToken = getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN;
@@ -1587,8 +1631,87 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
     gpuEnabled: !!gpu,
   });
 
+  // Write config overrides file from policy defaults into writable partition.
+  // This enables runtime config changes via `nemoclaw config set` — overrides
+  // are deep-merged onto the frozen openclaw.json at load time via our shim patch.
+  writeConfigOverridesFromPolicy(sandboxName);
+
   console.log(`  ✓ Sandbox '${sandboxName}' created`);
   return sandboxName;
+}
+
+/**
+ * Read config_overrides from the policy YAML and write the defaults
+ * as a JSON5 overrides file into the sandbox's writable partition.
+ */
+function writeConfigOverridesFromPolicy(sandboxName) {
+  const policyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+  if (!fs.existsSync(policyPath)) return;
+
+  const yaml = fs.readFileSync(policyPath, "utf-8");
+
+  // Simple YAML extraction of config_overrides section.
+  // For a POC we parse the defaults with a lightweight approach rather than
+  // pulling in a full YAML parser at this layer (pyyaml is only in Docker).
+  const startIdx = yaml.indexOf("\nconfig_overrides:\n");
+  if (startIdx === -1) return;
+  const overridesBlock = yaml.slice(startIdx);
+  const overrides = {};
+
+  // Parse dotted-path keys and their default values.
+  // Each entry looks like:
+  //   agents.defaults.model.primary:
+  //     default: "inference/nvidia/nemotron-3-super-120b-a12b"
+  const entryPattern = /^ {2}([\w.]+):\s*\n\s+default:\s*(.*)/gm;
+  let match;
+  while ((match = entryPattern.exec(overridesBlock)) !== null) {
+    const keyPath = match[1];
+    const rawValue = match[2].trim();
+
+    // Parse scalar values from YAML.
+    /** @type {string|boolean|number} */
+    let parsed;
+    if (rawValue.startsWith('"') || rawValue.startsWith("'")) {
+      parsed = rawValue.replace(/^["']|["']$/g, "");
+    } else if (rawValue === "false" || rawValue === "true") {
+      parsed = rawValue === "true";
+    } else if (!isNaN(Number(rawValue)) && rawValue !== "") {
+      parsed = Number(rawValue);
+    } else {
+      parsed = rawValue;
+    }
+    // For array/object defaults (multi-line), skip for now — the Dockerfile
+    // bakes these. Only scalar overrides are written to the overrides file.
+    if (typeof parsed === "string" || typeof parsed === "boolean" || typeof parsed === "number") {
+      setNestedValue(overrides, keyPath, parsed);
+    }
+  }
+
+  if (Object.keys(overrides).length === 0) return;
+
+  const json = JSON.stringify(overrides, null, 2);
+  const script = `cat > /sandbox/.openclaw-data/config-overrides.json5 <<'EOF_OVERRIDES'\n${json}\nEOF_OVERRIDES\nexit\n`;
+  const scriptFile = writeSandboxConfigSyncFile(script);
+  run(`openshell sandbox connect "${sandboxName}" < ${shellQuote(scriptFile)}`, { ignoreError: true });
+  try { fs.unlinkSync(scriptFile); } catch { /* cleanup best-effort */ }
+  console.log("  ✓ Config overrides file written to sandbox");
+}
+
+/**
+ * Set a value at a dotted path in a nested object.
+ * e.g. setNestedValue(obj, "agents.defaults.model.primary", "foo")
+ * creates { agents: { defaults: { model: { primary: "foo" } } } }
+ */
+function setNestedValue(obj, dottedPath, value) {
+  const parts = dottedPath.split(".");
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!(parts[i] in current) || typeof current[parts[i]] !== "object") {
+      current[parts[i]] = {};
+    }
+    current = current[parts[i]];
+  }
+  current[parts[parts.length - 1]] = value;
 }
 
 // ── Step 4: NIM ──────────────────────────────────────────────────

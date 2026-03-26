@@ -32,6 +32,7 @@ const {
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
+const { configSet, configGet } = require("./lib/config-set");
 const { parseGatewayInference } = require("./lib/inference-config");
 
 // ── Global commands ──────────────────────────────────────────────
@@ -730,6 +731,10 @@ function help() {
     nemoclaw <name> policy-add       Add a network or filesystem policy preset
     nemoclaw <name> policy-list      List presets ${D}(● = applied)${R}
 
+  ${G}Runtime Config:${R}
+    nemoclaw <name> config-set       Set a mutable config field ${D}(--key K --value V)${R}
+    nemoclaw <name> config-get       Show active config overrides ${D}(--key K for one)${R}
+
   ${G}Deploy:${R}
     nemoclaw deploy <instance>       Deploy to a Brev VM and start services
 
@@ -805,10 +810,12 @@ const [cmd, ...args] = process.argv.slice(2);
       case "logs":        sandboxLogs(cmd, actionArgs.includes("--follow")); break;
       case "policy-add":  await sandboxPolicyAdd(cmd); break;
       case "policy-list": sandboxPolicyList(cmd); break;
+      case "config-set":  configSet(cmd, actionArgs); break;
+      case "config-get":  configGet(cmd, actionArgs); break;
       case "destroy":     await sandboxDestroy(cmd, actionArgs); break;
       default:
         console.error(`  Unknown action: ${action}`);
-        console.error(`  Valid actions: connect, status, logs, policy-add, policy-list, destroy`);
+        console.error(`  Valid actions: connect, status, logs, policy-add, policy-list, config-set, config-get, destroy`);
         process.exit(1);
     }
     return;

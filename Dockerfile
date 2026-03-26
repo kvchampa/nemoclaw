@@ -27,6 +27,15 @@ RUN (apt-get remove --purge -y gcc gcc-12 g++ g++-12 cpp cpp-12 make \
     && apt-get autoremove --purge -y \
     && rm -rf /var/lib/apt/lists/*
 
+# Apply config overrides shim to the pre-installed OpenClaw CLI.
+# The shim adds OPENCLAW_CONFIG_OVERRIDES_FILE support: a deep-merged overlay
+# file that enables runtime config changes without modifying the frozen
+# openclaw.json.  Applied to ALL dist entry points because the bundler
+# duplicates resolveConfigForRead across multiple chunks.
+COPY patches/apply-openclaw-shim.js /tmp/apply-openclaw-shim.js
+RUN node /tmp/apply-openclaw-shim.js /usr/local/lib/node_modules/openclaw \
+    && rm /tmp/apply-openclaw-shim.js
+
 # Copy built plugin and blueprint into the sandbox
 COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/
 COPY nemoclaw/openclaw.plugin.json /opt/nemoclaw/
@@ -67,7 +76,8 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     CHAT_UI_URL=${CHAT_UI_URL} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
-    NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64}
+    NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64} \
+    OPENCLAW_CONFIG_OVERRIDES_FILE=/sandbox/.openclaw-data/config-overrides.json5
 
 WORKDIR /sandbox
 USER sandbox

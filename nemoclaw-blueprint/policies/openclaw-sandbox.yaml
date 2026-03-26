@@ -43,6 +43,11 @@ process:
   run_as_user: sandbox
   run_as_group: sandbox
 
+# Note: tls: terminate annotations removed — OpenShell >= 0.0.15 auto-detects
+# TLS and terminates unconditionally for credential injection (PR #544).
+# Endpoints with permissive wildcard rules (method: "*") simplified to L4-only.
+# Restrictive L7 rules (GET-only, path-scoped) retained for enforcement.
+
 network_policies:
   claude_code:
     name: claude_code
@@ -51,17 +56,12 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: "*", path: "/**" }
       - host: statsig.anthropic.com
         port: 443
-        rules:
-          - allow: { method: "*", path: "/**" }
       - host: sentry.io
         port: 443
-        rules:
-          - allow: { method: "*", path: "/**" }
     binaries:
       - { path: /usr/local/bin/claude }
 
@@ -72,14 +72,12 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: "*", path: "/**" }
       - host: inference-api.nvidia.com
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: "*", path: "/**" }
     binaries:
@@ -112,7 +110,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -126,7 +123,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -140,7 +136,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
     binaries:
@@ -167,7 +162,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/bot*/**" }
           - allow: { method: POST, path: "/bot*/**" }
@@ -181,7 +175,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -189,7 +182,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -197,7 +189,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
     binaries:

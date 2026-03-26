@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
 import policies from "../bin/lib/policies";
 
@@ -133,6 +135,35 @@ describe("policies", () => {
       expect(cmd).toBe(
         "openshell policy get --full 'my-assistant' 2>/dev/null",
       );
+    });
+  });
+
+  describe("base policy", () => {
+    const basePolicyPath = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+    const basePolicy = fs.readFileSync(basePolicyPath, "utf-8");
+
+    it("does not contain tls: terminate (deprecated in OpenShell >= 0.0.15)", () => {
+      const lines = basePolicy.split("\n").filter(l => !l.trim().startsWith("#"));
+      for (const line of lines) {
+        expect(line.includes("tls: terminate")).toBe(false);
+      }
+    });
+
+  });
+
+  describe("no preset contains tls: terminate", () => {
+    it("all presets are free of deprecated tls: terminate", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        const lines = content.split("\n").filter(l => !l.trim().startsWith("#"));
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes("tls: terminate")) {
+            expect.unreachable(
+              `${p.name} line ${i + 1}: contains deprecated tls: terminate`
+            );
+          }
+        }
+      }
     });
   });
 

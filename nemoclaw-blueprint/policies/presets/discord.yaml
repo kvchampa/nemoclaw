@@ -13,7 +13,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
           - allow: { method: POST, path: "/**" }
@@ -31,7 +30,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
       # Media/attachment access (read-only, proxied through Discord CDN)
@@ -39,7 +37,6 @@ network_policies:
         port: 443
         protocol: rest
         enforcement: enforce
-        tls: terminate
         rules:
           - allow: { method: GET, path: "/**" }
     binaries:

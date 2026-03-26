@@ -33,8 +33,11 @@ esac
 
 info "Detected $OS_LABEL ($ARCH_LABEL)"
 
-# Minimum version required for cgroup v2 fix (NVIDIA/OpenShell#329)
-MIN_VERSION="0.0.7"
+# Minimum version required for:
+#   - auto-TLS termination and credential injection (NVIDIA/OpenShell#544)
+#   - security hardening SEC-002–010 (NVIDIA/OpenShell#548)
+#   - runtime settings channel (NVIDIA/OpenShell#474)
+MIN_VERSION="0.0.15"
 
 version_gte() {
   # Returns 0 (true) if $1 >= $2 — portable, no sort -V (BSD compat)

@@ -63,6 +63,11 @@ case "${1:-}" in
 esac
 NEMOCLAW_CMD=("$@")
 CHAT_UI_URL="${CHAT_UI_URL:-http://127.0.0.1:18789}"
+
+# Config overrides file: the OpenClaw shim patch reads this and deep-merges
+# onto the frozen openclaw.json.  Set unconditionally so the shim is active
+# regardless of how the sandbox was created.
+export OPENCLAW_CONFIG_OVERRIDES_FILE=/sandbox/.openclaw-data/config-overrides.json5
 PUBLIC_PORT=18789
 OPENCLAW="$(command -v openclaw)" # Resolve once, use absolute path everywhere
 
@@ -223,6 +228,11 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
   write_auth_profile
 
+  # Create empty config overrides file (non-root path)
+  if [ -n "${OPENCLAW_CONFIG_OVERRIDES_FILE:-}" ] && [ ! -f "${OPENCLAW_CONFIG_OVERRIDES_FILE}" ]; then
+    echo '{}' >"${OPENCLAW_CONFIG_OVERRIDES_FILE}"
+  fi
+
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
     exec "${NEMOCLAW_CMD[@]}"
   fi
@@ -250,6 +260,14 @@ fi
 
 # Verify config integrity before starting anything
 verify_config_integrity
+
+# Create empty config overrides file so the shim has a valid target on first
+# load.  The file lives in the writable partition and can be updated at
+# runtime via `nemoclaw config-set` or `openshell sandbox upload`.
+if [ -n "${OPENCLAW_CONFIG_OVERRIDES_FILE:-}" ] && [ ! -f "${OPENCLAW_CONFIG_OVERRIDES_FILE}" ]; then
+  echo '{}' >"${OPENCLAW_CONFIG_OVERRIDES_FILE}"
+  chown sandbox:sandbox "${OPENCLAW_CONFIG_OVERRIDES_FILE}"
+fi
 
 # Write auth profile as sandbox user (needs writable .openclaw-data)
 gosu sandbox bash -c "$(declare -f write_auth_profile); write_auth_profile"
