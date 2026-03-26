@@ -643,7 +643,7 @@ async function sandboxStatus(sandboxName) {
 
 function sandboxLogs(sandboxName, follow) {
   const args = ["logs", sandboxName];
-  if (follow) args.push("--follow");
+  if (follow) args.push("--tail");
   runOpenshell(args);
 }
 
