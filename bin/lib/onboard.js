@@ -27,7 +27,6 @@ const {
 } = require("./inference-config");
 const {
   inferContainerRuntime,
-  isUnsupportedMacosRuntime,
   shouldPatchCoredns,
 } = require("./platform");
 const { resolveOpenshell } = require("./resolve-openshell");
@@ -1227,12 +1226,6 @@ async function preflight() {
   console.log("  ✓ Docker is running");
 
   const runtime = getContainerRuntime();
-  if (isUnsupportedMacosRuntime(runtime)) {
-    console.error("  Podman on macOS is not supported by NemoClaw at this time.");
-    console.error("  OpenShell currently depends on Docker host-gateway behavior that Podman on macOS does not provide.");
-    console.error("  Use Colima or Docker Desktop on macOS instead.");
-    process.exit(1);
-  }
   if (runtime !== "unknown") {
     console.log(`  ✓ Container runtime: ${runtime}`);
   }
@@ -1403,10 +1396,9 @@ async function startGatewayWithOptions(_gpu, { exitOnFailure = true } = {}) {
     sleep(2);
   }
 
-  // CoreDNS fix — always run. k3s-inside-Docker has broken DNS on all platforms.
   const runtime = getContainerRuntime();
   if (shouldPatchCoredns(runtime)) {
-    console.log("  Patching CoreDNS for Colima...");
+    console.log(`  Patching CoreDNS for ${runtime}...`);
     run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" ${GATEWAY_NAME} 2>&1 || true`, { ignoreError: true });
   }
   // Give DNS a moment to propagate
