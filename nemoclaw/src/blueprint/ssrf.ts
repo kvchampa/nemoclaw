@@ -16,7 +16,10 @@ const PRIVATE_NETWORKS: CidrRange[] = [
   cidr("192.168.0.0", 16),
   cidr("169.254.0.0", 16),
   cidr6("::1", 128),
-  cidr6("fd00::", 8),
+  cidr6("::", 128),
+  cidr6("fc00::", 7),
+  cidr6("fe80::", 10),
+  cidr6("ff00::", 8),
 ];
 
 const ALLOWED_SCHEMES = new Set(["https:", "http:"]);
