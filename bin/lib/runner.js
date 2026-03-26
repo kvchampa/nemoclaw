@@ -13,6 +13,28 @@ if (dockerHost) {
   process.env.DOCKER_HOST = dockerHost.dockerHost;
 }
 
+// Redact known secret patterns from command strings for logging and error output.
+// Handles unquoted (KEY=val), double-quoted (KEY="val"), and single-quoted (KEY='val') forms.
+function redactSecrets(str) {
+  const keyedSecrets = [
+    "NVIDIA_API_KEY",
+    "GITHUB_TOKEN",
+    "TELEGRAM_BOT_TOKEN",
+    "OPENAI_API_KEY",
+    "SLACK_BOT_TOKEN",
+    "DISCORD_BOT_TOKEN",
+  ];
+  let result = String(str ?? "");
+  for (const key of keyedSecrets) {
+    // Match KEY="quoted" or KEY='quoted' or KEY=unquoted
+    const pattern = new RegExp(`${key}=(?:"[^"]*"|'[^']*'|[^\\s"']*)`, "g");
+    result = result.replace(pattern, `${key}=***`);
+  }
+  // Bare nvapi- tokens (e.g., in Bearer headers)
+  result = result.replace(/nvapi-[A-Za-z0-9_-]+/g, (match) => match.slice(0, 8) + "***");
+  return result;
+}
+
 function run(cmd, opts = {}) {
   const stdio = opts.stdio ?? ["ignore", "inherit", "inherit"];
   const result = spawnSync("bash", ["-c", cmd], {
@@ -22,7 +44,7 @@ function run(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${cmd.slice(0, 80)}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
   return result;
@@ -37,7 +59,7 @@ function runInteractive(cmd, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0 && !opts.ignoreError) {
-    console.error(`  Command failed (exit ${result.status}): ${cmd.slice(0, 80)}`);
+    console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
   return result;
@@ -54,6 +76,17 @@ function runCapture(cmd, opts = {}) {
     }).trim();
   } catch (err) {
     if (opts.ignoreError) return "";
+    // Redact secrets from the error message so callers that log the
+    // thrown error don't accidentally leak credentials.
+    if (err.message) {
+      err.message = redactSecrets(err.message);
+    }
+    if (err.stderr) {
+      err.stderr = redactSecrets(err.stderr);
+    }
+    if (err.stdout) {
+      err.stdout = redactSecrets(err.stdout);
+    }
     throw err;
   }
 }
@@ -85,4 +118,4 @@ function validateName(name, label = "name") {
   return name;
 }
 
-module.exports = { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName };
+module.exports = { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName, redactSecrets };
