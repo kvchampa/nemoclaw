@@ -532,8 +532,34 @@ function showStatus() {
   run(`bash "${SCRIPTS}/start-services.sh" --status`);
 }
 
-function listSandboxes() {
+function listSandboxes(args = []) {
+  const allowedArgs = new Set(["--json", "--help", "-h"]);
+  const unknownArgs = args.filter((arg) => !allowedArgs.has(arg));
+  if (unknownArgs.length > 0) {
+    console.error(`  Unknown list option(s): ${unknownArgs.join(", ")}`);
+    console.error("  Usage: nemoclaw list [--json]");
+    process.exit(1);
+  }
+
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log("");
+    console.log("  Usage: nemoclaw list [options]");
+    console.log("");
+    console.log("  Options:");
+    console.log("    --json        Output list as JSON");
+    console.log("    --help, -h    Show this help");
+    console.log("");
+    return;
+  }
+
+  const json = args.includes("--json");
   const { sandboxes, defaultSandbox } = registry.listSandboxes();
+
+  if (json) {
+    console.log(JSON.stringify({ sandboxes, defaultSandbox }, null, 2));
+    return;
+  }
+
   if (sandboxes.length === 0) {
     console.log("");
     console.log("  No sandboxes registered. Run `nemoclaw onboard` to get started.");
@@ -720,7 +746,7 @@ function help() {
     nemoclaw setup-spark             Set up on DGX Spark ${D}(fixes cgroup v2 + Docker)${R}
 
   ${G}Sandbox Management:${R}
-    ${B}nemoclaw list${R}                    List all sandboxes
+    ${B}nemoclaw list${R}                    List all sandboxes ${D}(--json for machine-readable)${R}
     nemoclaw <name> connect          Shell into a running sandbox
     nemoclaw <name> status           Sandbox health + NIM status
     nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
@@ -780,13 +806,14 @@ const [cmd, ...args] = process.argv.slice(2);
       case "status":      showStatus(); break;
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
-      case "list":        listSandboxes(); break;
+      case "list":        listSandboxes(args); break;
       case "--version":
       case "-v": {
         const pkg = require(path.join(__dirname, "..", "package.json"));
         console.log(`nemoclaw v${pkg.version}`);
         break;
       }
+
       default:            help(); break;
     }
     return;
