@@ -293,5 +293,12 @@ describe("regression guards", () => {
         expect(line.includes("NVIDIA_API_KEY")).toBe(false);
       }
     });
+
+    it("telegram bridge requires ALLOWED_CHAT_IDS or ALLOW_ALL_CHATS", () => {
+
+      const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
+      expect(src).toContain("ALLOWED_CHAT_IDS");
+      expect(src).toContain("ALLOW_ALL_CHATS");
+    });
   });
 });
