@@ -11,6 +11,7 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, run, runCapture, shellQuote } = require("./runner");
 const {
+  HOST_GATEWAY_URL,
   getDefaultOllamaModel,
   getBootstrapOllamaModelOptions,
   getLocalProviderBaseUrl,
@@ -1133,6 +1134,36 @@ function sleep(seconds) {
   require("child_process").spawnSync("sleep", [String(seconds)]);
 }
 
+// ── Ollama auth proxy ─────────────────────────────────────────────
+// Ollama has no built-in auth and must not listen on 0.0.0.0 (PSIRT
+// bug 6002780). We bind Ollama to 127.0.0.1 and front it with a
+// token-authenticated proxy on 0.0.0.0:11435 so the OpenShell gateway
+// (running in a container) can still reach it.
+
+let ollamaProxyToken = null;
+
+function startOllamaAuthProxy() {
+  // Kill any stale proxy from a previous onboard run so the new token takes effect
+  run('lsof -ti :11435 | xargs kill 2>/dev/null || true', { ignoreError: true });
+  const crypto = require("crypto");
+  ollamaProxyToken = crypto.randomBytes(24).toString("hex");
+  run(
+    `OLLAMA_PROXY_TOKEN=${shellQuote(ollamaProxyToken)} ` +
+    `node "${SCRIPTS}/ollama-auth-proxy.js" > /dev/null 2>&1 &`,
+    { ignoreError: true },
+  );
+  sleep(1);
+  // Verify proxy is actually listening before proceeding
+  const probe = runCapture("curl -sf --connect-timeout 2 http://127.0.0.1:11435/api/tags 2>/dev/null", { ignoreError: true });
+  if (!probe) {
+    console.error("  Warning: Ollama auth proxy did not start on :11435");
+  }
+}
+
+function getOllamaProxyToken() {
+  return ollamaProxyToken;
+}
+
 async function ensureNamedCredential(envName, label, helpUrl = null) {
   let key = getCredential(envName);
   if (key) {
@@ -1871,11 +1902,12 @@ async function setupNim(gpu) {
       break;
     } else if (selected.key === "ollama") {
       if (!ollamaRunning) {
-        console.log("  Starting Ollama...");
-        run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+        console.log("  Starting Ollama (localhost only)...");
+        run("OLLAMA_HOST=127.0.0.1:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
         sleep(2);
       }
-      console.log("  ✓ Using Ollama on localhost:11434");
+      startOllamaAuthProxy();
+      console.log("  ✓ Using Ollama on localhost:11434 (proxy on :11435)");
       provider = "ollama-local";
       credentialEnv = "OPENAI_API_KEY";
       endpointUrl = getLocalProviderBaseUrl(provider);
@@ -1912,10 +1944,11 @@ async function setupNim(gpu) {
     } else if (selected.key === "install-ollama") {
       console.log("  Installing Ollama via Homebrew...");
       run("brew install ollama", { ignoreError: true });
-      console.log("  Starting Ollama...");
-      run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
-        sleep(2);
-      console.log("  ✓ Using Ollama on localhost:11434");
+      console.log("  Starting Ollama (localhost only)...");
+      run("OLLAMA_HOST=127.0.0.1:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+      sleep(2);
+      startOllamaAuthProxy();
+      console.log("  ✓ Using Ollama on localhost:11434 (proxy on :11435)");
       provider = "ollama-local";
       credentialEnv = "OPENAI_API_KEY";
       endpointUrl = getLocalProviderBaseUrl(provider);
@@ -2029,9 +2062,12 @@ async function setupInference(sandboxName, model, provider, endpointUrl = null, 
       console.error("  On macOS, local inference also depends on OpenShell host routing support.");
       process.exit(1);
     }
-    const baseUrl = getLocalProviderBaseUrl(provider);
-    upsertProvider("ollama-local", "openai", "OPENAI_API_KEY", baseUrl, {
-      OPENAI_API_KEY: "ollama",
+    // Use the auth proxy URL (port 11435) instead of direct Ollama (11434).
+    // The proxy validates a per-instance Bearer token before forwarding.
+    const proxyToken = getOllamaProxyToken() || "ollama";
+    const proxyBaseUrl = `${HOST_GATEWAY_URL}:11435/v1`;
+    upsertProvider("ollama-local", "openai", "OPENAI_API_KEY", proxyBaseUrl, {
+      OPENAI_API_KEY: proxyToken,
     });
     runOpenshell(["inference", "set", "--no-verify", "--provider", "ollama-local", "--model", model]);
     console.log(`  Priming Ollama model: ${model}`);

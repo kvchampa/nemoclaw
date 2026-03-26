@@ -179,3 +179,18 @@ jobs:
 
       - name: Run gateway isolation E2E tests
         run: NEMOCLAW_TEST_IMAGE=nemoclaw-production bash test/e2e-gateway-isolation.sh
+
+  test-e2e-ollama-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Run Ollama auth proxy E2E tests
+        run: bash test/e2e-ollama-proxy.sh
