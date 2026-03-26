@@ -6,9 +6,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  _setNonInteractiveForTest,
+  _setPromptForTest,
   buildSandboxConfigSyncScript,
   getFutureShellPathHint,
   getInstalledOpenshellVersion,
@@ -16,6 +18,7 @@ import {
   getSandboxInferenceConfig,
   getStableGatewayImageRef,
   patchStagedDockerfile,
+  promptOrDefault,
   writeSandboxConfigSyncFile,
 } from "../bin/lib/onboard";
 
@@ -872,4 +875,106 @@ const { setupInference } = require(${onboardPath});
     assert.equal(commands.length, 3);
   });
 
+});
+
+// Non-interactive branch: exercises env-var / default fallback logic.
+describe("promptOrDefault (non-interactive)", () => {
+  let savedTestPromptCustom;
+
+  beforeAll(() => {
+    savedTestPromptCustom = process.env.TEST_PROMPT_CUSTOM;
+    _setNonInteractiveForTest(true);
+  });
+
+  afterAll(() => {
+    _setNonInteractiveForTest(false);
+    if (savedTestPromptCustom === undefined) {
+      delete process.env.TEST_PROMPT_CUSTOM;
+    } else {
+      process.env.TEST_PROMPT_CUSTOM = savedTestPromptCustom;
+    }
+  });
+
+  it("returns custom value from env var", async () => {
+    process.env.TEST_PROMPT_CUSTOM = "my-sandbox";
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toBe("my-sandbox");
+  });
+
+  it("falls back to defaultValue when env var is unset", async () => {
+    delete process.env.TEST_PROMPT_CUSTOM;
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toBe("my-assistant");
+  });
+
+  it("falls back to defaultValue when env var is empty", async () => {
+    process.env.TEST_PROMPT_CUSTOM = "";
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toBe("my-assistant");
+  });
+
+  it("falls back to defaultValue when envVar param is null", async () => {
+    const result = await promptOrDefault("Name: ", null, "fallback-name");
+    expect(result).toBe("fallback-name");
+  });
+
+  it("preserves valid custom name with hyphens", async () => {
+    process.env.TEST_PROMPT_CUSTOM = "dev-sandbox-1";
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toBe("dev-sandbox-1");
+  });
+
+  it("returned value passes RFC 1123 validation when using default", async () => {
+    delete process.env.TEST_PROMPT_CUSTOM;
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
+  });
+
+  it("returned value passes RFC 1123 validation with custom name", async () => {
+    process.env.TEST_PROMPT_CUSTOM = "test-sandbox-42";
+    const result = await promptOrDefault("Name: ", "TEST_PROMPT_CUSTOM", "my-assistant");
+    expect(result).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
+  });
+});
+
+// Interactive branch: uses an injected prompt function to simulate user input.
+describe("promptOrDefault (interactive)", () => {
+  beforeAll(() => {
+    _setNonInteractiveForTest(false);
+  });
+
+  afterAll(() => {
+    _setPromptForTest(null);
+    _setNonInteractiveForTest(false);
+  });
+
+  it("falls back to defaultValue when user presses Enter (empty input)", async () => {
+    _setPromptForTest(() => "");
+    const result = await promptOrDefault("Name: ", "UNUSED", "my-assistant");
+    expect(result).toBe("my-assistant");
+  });
+
+  it("falls back to defaultValue when user enters only whitespace", async () => {
+    _setPromptForTest(() => "   ");
+    const result = await promptOrDefault("Name: ", "UNUSED", "my-assistant");
+    expect(result).toBe("my-assistant");
+  });
+
+  it("returns trimmed custom value when user enters padded input", async () => {
+    _setPromptForTest(() => "  custom  ");
+    const result = await promptOrDefault("Name: ", "UNUSED", "my-assistant");
+    expect(result).toBe("custom");
+  });
+
+  it("returns user input as-is when already trimmed", async () => {
+    _setPromptForTest(() => "dev-box");
+    const result = await promptOrDefault("Name: ", "UNUSED", "my-assistant");
+    expect(result).toBe("dev-box");
+  });
+
+  it("falls back to defaultValue when prompt returns null", async () => {
+    _setPromptForTest(() => null);
+    const result = await promptOrDefault("Name: ", "UNUSED", "my-assistant");
+    expect(result).toBe("my-assistant");
+  });
 });
