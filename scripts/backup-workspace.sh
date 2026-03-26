@@ -38,7 +38,7 @@ EOF
 }
 
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || fail "'$1' is required but not found in PATH."
+  command -v "$1" >/dev/null 2>&1 || fail "'$1' is required but not found in PATH."
 }
 
 do_backup() {

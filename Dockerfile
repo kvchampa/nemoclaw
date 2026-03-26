@@ -152,7 +152,6 @@ RUN chown root:root /sandbox/.openclaw \
     && chmod 444 /sandbox/.openclaw/openclaw.json \
     && chown -R sandbox:sandbox /sandbox/.openclaw-data/workspace \
                                 /sandbox/.openclaw-data/agents
-USER sandbox
 
 # Entrypoint runs as root to start the gateway as the gateway user,
 # then drops to sandbox for agent commands. See nemoclaw-start.sh.
