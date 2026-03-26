@@ -254,6 +254,7 @@ Back Up and Restore <workspace/backup-restore>
 :hidden:
 
 Architecture <reference/architecture>
+Agent Identity Files <reference/agent-identity-files>
 Commands <reference/commands>
 Inference Profiles <reference/inference-profiles>
 Network Policies <reference/network-policies>
