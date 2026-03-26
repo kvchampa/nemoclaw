@@ -1214,6 +1214,58 @@ function getNonInteractiveModel(providerKey) {
   return model;
 }
 
+/** Map openshell provider name (stored in registry) to NEMOCLAW_PROVIDER / REMOTE_PROVIDER_CONFIG key. */
+function inferRemoteProviderKeyFromStoredName(storedName) {
+  if (!storedName) return null;
+  const map = {
+    "nvidia-prod": "build",
+    "nvidia-nim": "build",
+    "openai-api": "openai",
+    "anthropic-prod": "anthropic",
+    "compatible-endpoint": "custom",
+    "compatible-anthropic-endpoint": "anthropicCompatible",
+    "gemini-api": "gemini",
+    "ollama-local": "ollama",
+    "vllm-local": "vllm",
+  };
+  return map[storedName] || null;
+}
+
+/**
+ * When NEMOCLAW_SANDBOX_NAME is set and provider/model env vars are unset, fill them from
+ * ~/.nemoclaw/sandboxes.json so upgrade / CI can skip inference prompts.
+ * Falls back to the gateway key "nemoclaw" for legacy registry entries.
+ */
+function hydrateNonInteractiveInferenceFromRegistry() {
+  if (!isNonInteractive()) return;
+  const name = (process.env.NEMOCLAW_SANDBOX_NAME || "").trim();
+  if (!name) return;
+  let entry = registry.getSandbox(name);
+  if (!entry || !entry.model) {
+    entry = registry.getSandbox(GATEWAY_NAME);
+  }
+  if (!entry || !entry.model) return;
+
+  const providerKey = (process.env.NEMOCLAW_PROVIDER || "").trim();
+  const modelEnv = (process.env.NEMOCLAW_MODEL || "").trim();
+  if (!providerKey && entry.provider) {
+    let inferred = inferRemoteProviderKeyFromStoredName(entry.provider);
+    if (entry.provider === "vllm-local" && entry.nimContainer) {
+      inferred = "nim-local";
+    } else if (entry.provider === "vllm-local" && !entry.nimContainer) {
+      inferred = "vllm";
+    }
+    if (inferred) {
+      process.env.NEMOCLAW_PROVIDER = inferred;
+      note(`  [non-interactive] NEMOCLAW_PROVIDER (from registry) → ${inferred}`);
+    }
+  }
+  if (!modelEnv && entry.model) {
+    process.env.NEMOCLAW_MODEL = entry.model;
+    note(`  [non-interactive] NEMOCLAW_MODEL (from registry) → ${entry.model}`);
+  }
+}
+
 // ── Step 1: Preflight ────────────────────────────────────────────
 
 async function preflight() {
@@ -1595,6 +1647,8 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
 async function setupNim(gpu) {
   step(2, 7, "Configuring inference (NIM)");
 
+  hydrateNonInteractiveInferenceFromRegistry();
+
   let model = null;
   let provider = REMOTE_PROVIDER_CONFIG.build.providerName;
   let nimContainer = null;
@@ -1704,10 +1758,13 @@ async function setupNim(gpu) {
 
       if (selected.key === "build") {
         if (isNonInteractive()) {
-          if (!process.env.NVIDIA_API_KEY) {
+          const key = getCredential("NVIDIA_API_KEY");
+          if (!key) {
             console.error("  NVIDIA_API_KEY is required for NVIDIA Endpoints in non-interactive mode.");
+            console.error("  Set it in the environment or ~/.nemoclaw/credentials.json, or run interactive onboard.");
             process.exit(1);
           }
+          process.env.NVIDIA_API_KEY = key;
         } else {
           await ensureApiKey();
         }
@@ -2041,7 +2098,6 @@ async function setupInference(sandboxName, model, provider, endpointUrl = null, 
   }
 
   verifyInferenceRoute(provider, model);
-  registry.updateSandbox(sandboxName, { model, provider });
   console.log(`  ✓ Inference route set: ${provider} / ${model}`);
 }
 

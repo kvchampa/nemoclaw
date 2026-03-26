@@ -96,6 +96,24 @@ Restore from a specific timestamp:
 $ ./scripts/backup-workspace.sh restore my-assistant 20260320-120000
 ```
 
+## Upgrade workflow (image rebuild / onboard)
+
+Before you change the sandbox image (for example after editing `Dockerfile`) or run `nemoclaw onboard`, back up. Optional files such as `MEMORY.md` or `memory/` may not exist yet; the backup script skips them with a warning.
+
+Use the upgrade helper to run workspace backup, optionally snapshot all of `/sandbox/.openclaw-data/`, and optionally run `nemoclaw onboard`:
+
+```console
+$ ./scripts/upgrade-sandbox.sh my-assistant
+$ ./scripts/upgrade-sandbox.sh --full-data my-assistant
+$ ./scripts/upgrade-sandbox.sh --run-onboard --yes my-assistant
+```
+
+- `--full-data` downloads the full OpenClaw state tree (larger; includes sessions and agents beyond the Markdown workspace).
+- `--run-onboard` runs `nemoclaw onboard` from the repo root (or `NEMOCLAW_REPO_ROOT`). After a successful onboard, the script **automatically** runs `backup-workspace.sh restore` for the backup timestamp created at the start (so you do not need to run restore by hand). Use `--no-restore` to skip that step if you want a fresh workspace after the rebuild.
+- Without `--run-onboard`, the script only backs up and prints suggested next commands.
+
+See `scripts/upgrade-sandbox.sh --help` for options and environment variables.
+
 ## Verifying a Backup
 
 List backed-up files to confirm completeness:

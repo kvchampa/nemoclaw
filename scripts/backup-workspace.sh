@@ -6,12 +6,17 @@ set -euo pipefail
 
 WORKSPACE_PATH="/sandbox/.openclaw/workspace"
 BACKUP_BASE="${HOME}/.nemoclaw/backups"
-FILES=(SOUL.md USER.md IDENTITY.md AGENTS.md MEMORY.md)
-DIRS=(memory)
+
+# Core persona files — expected once the agent has initialized workspace.
+FILES_CORE=(SOUL.md USER.md IDENTITY.md AGENTS.md)
+# Long-term memory — created later; missing paths are normal (no noisy tar errors).
+FILES_OPTIONAL=(MEMORY.md)
+DIRS_OPTIONAL=(memory)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+DIM='\033[0;90m'
 NC='\033[0m'
 
 info() { echo -e "${GREEN}[backup]${NC} $1"; }
@@ -37,6 +42,18 @@ EOF
   exit 1
 }
 
+# Download from sandbox. Optional paths suppress stderr because openshell/tar
+# emit multi-line errors when a file or directory does not exist yet.
+sandbox_download() {
+  local sandbox="$1" remote="$2" dest="$3"
+  local quiet="${4:-0}"
+  if [[ "$quiet" == "1" ]]; then
+    openshell sandbox download "$sandbox" "$remote" "$dest" 2>/dev/null
+  else
+    openshell sandbox download "$sandbox" "$remote" "$dest"
+  fi
+}
+
 do_backup() {
   local sandbox="$1"
   local ts
@@ -52,19 +69,29 @@ do_backup() {
   info "Backing up workspace from sandbox '${sandbox}'..."
 
   local count=0
-  for f in "${FILES[@]}"; do
-    if openshell sandbox download "$sandbox" "${WORKSPACE_PATH}/${f}" "${dest}/"; then
+  local f d
+
+  for f in "${FILES_CORE[@]}"; do
+    if sandbox_download "$sandbox" "${WORKSPACE_PATH}/${f}" "${dest}/" 0; then
       count=$((count + 1))
     else
       warn "Skipped ${f} (not found or download failed)"
     fi
   done
 
-  for d in "${DIRS[@]}"; do
-    if openshell sandbox download "$sandbox" "${WORKSPACE_PATH}/${d}/" "${dest}/${d}/"; then
+  for f in "${FILES_OPTIONAL[@]}"; do
+    if sandbox_download "$sandbox" "${WORKSPACE_PATH}/${f}" "${dest}/" 1; then
       count=$((count + 1))
     else
-      warn "Skipped ${d}/ (not found or download failed)"
+      echo -e "${DIM}[backup]${NC} Optional ${f} not in sandbox — skipped (normal until created)."
+    fi
+  done
+
+  for d in "${DIRS_OPTIONAL[@]}"; do
+    if sandbox_download "$sandbox" "${WORKSPACE_PATH}/${d}/" "${dest}/${d}/" 1; then
+      count=$((count + 1))
+    else
+      echo -e "${DIM}[backup]${NC} Optional ${d}/ not in sandbox — skipped (normal until created)."
     fi
   done
 
@@ -75,12 +102,21 @@ do_backup() {
   info "Backup saved to ${dest}/ (${count} items)"
 }
 
+# Latest backup directory name (mtime); portable (no find -printf).
+latest_backup_timestamp() {
+  if [ ! -d "$BACKUP_BASE" ]; then
+    return 1
+  fi
+  # shellcheck disable=SC2012  # backup dirs are YYYYMMDD-HHMMSS — no special chars
+  ls -1t "$BACKUP_BASE" 2>/dev/null | head -n1
+}
+
 do_restore() {
   local sandbox="$1"
   local ts="${2:-}"
 
   if [ -z "$ts" ]; then
-    ts="$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -r | head -n1 || true)"
+    ts="$(latest_backup_timestamp || true)"
     [ -n "$ts" ] || fail "No backups found in ${BACKUP_BASE}/"
     info "Using most recent backup: ${ts}"
   fi
@@ -91,7 +127,9 @@ do_restore() {
   info "Restoring workspace to sandbox '${sandbox}' from ${src}..."
 
   local count=0
-  for f in "${FILES[@]}"; do
+  local f d
+
+  for f in "${FILES_CORE[@]}"; do
     if [ -f "${src}/${f}" ]; then
       if openshell sandbox upload "$sandbox" "${src}/${f}" "${WORKSPACE_PATH}/"; then
         count=$((count + 1))
@@ -101,7 +139,17 @@ do_restore() {
     fi
   done
 
-  for d in "${DIRS[@]}"; do
+  for f in "${FILES_OPTIONAL[@]}"; do
+    if [ -f "${src}/${f}" ]; then
+      if openshell sandbox upload "$sandbox" "${src}/${f}" "${WORKSPACE_PATH}/"; then
+        count=$((count + 1))
+      else
+        warn "Failed to restore ${f}"
+      fi
+    fi
+  done
+
+  for d in "${DIRS_OPTIONAL[@]}"; do
     if [ -d "${src}/${d}" ]; then
       if openshell sandbox upload "$sandbox" "${src}/${d}/" "${WORKSPACE_PATH}/${d}/"; then
         count=$((count + 1))
