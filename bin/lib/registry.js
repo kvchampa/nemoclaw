@@ -8,6 +8,7 @@ const path = require("path");
 
 const REGISTRY_FILE = path.join(process.env.HOME || "/tmp", ".nemoclaw", "sandboxes.json");
 
+/** Load the sandbox registry from disk, returning an empty state if absent or corrupt. */
 function load() {
   try {
     if (fs.existsSync(REGISTRY_FILE)) {
@@ -17,17 +18,20 @@ function load() {
   return { sandboxes: {}, defaultSandbox: null };
 }
 
+/** Persist the given registry state to ~/.nemoclaw/sandboxes.json. */
 function save(data) {
   const dir = path.dirname(REGISTRY_FILE);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+/** Return the sandbox entry for the given name, or null if not found. */
 function getSandbox(name) {
   const data = load();
   return data.sandboxes[name] || null;
 }
 
+/** Return the name of the default sandbox, falling back to the first registered one. */
 function getDefault() {
   const data = load();
   if (data.defaultSandbox && data.sandboxes[data.defaultSandbox]) {
@@ -38,6 +42,7 @@ function getDefault() {
   return names.length > 0 ? names[0] : null;
 }
 
+/** Register a new sandbox in the registry, setting it as default if none exists. */
 function registerSandbox(entry) {
   const data = load();
   data.sandboxes[entry.name] = {
@@ -55,6 +60,7 @@ function registerSandbox(entry) {
   save(data);
 }
 
+/** Merge updates into an existing sandbox entry. Returns false if the sandbox does not exist. */
 function updateSandbox(name, updates) {
   const data = load();
   if (!data.sandboxes[name]) return false;
@@ -63,6 +69,7 @@ function updateSandbox(name, updates) {
   return true;
 }
 
+/** Remove a sandbox by name and reassign the default if necessary. */
 function removeSandbox(name) {
   const data = load();
   if (!data.sandboxes[name]) return false;
@@ -75,6 +82,7 @@ function removeSandbox(name) {
   return true;
 }
 
+/** List all registered sandboxes and the current default. */
 function listSandboxes() {
   const data = load();
   return {
@@ -83,6 +91,7 @@ function listSandboxes() {
   };
 }
 
+/** Set the named sandbox as the default. Returns false if the sandbox does not exist. */
 function setDefault(name) {
   const data = load();
   if (!data.sandboxes[name]) return false;
@@ -91,6 +100,7 @@ function setDefault(name) {
   return true;
 }
 
+/** Reset the registry to an empty state, removing all sandboxes and the default selection. */
 function clearAll() {
   save({ sandboxes: {}, defaultSandbox: null });
 }
