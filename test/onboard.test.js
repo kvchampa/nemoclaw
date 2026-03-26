@@ -16,8 +16,23 @@ import {
   getSandboxInferenceConfig,
   getStableGatewayImageRef,
   patchStagedDockerfile,
+  resolveDashboardForwardTarget,
   writeSandboxConfigSyncFile,
 } from "../bin/lib/onboard";
+
+describe("resolveDashboardForwardTarget", () => {
+  it("keeps loopback chat UI URLs bound to loopback", () => {
+    expect(resolveDashboardForwardTarget("http://127.0.0.1:18789")).toBe("18789");
+    expect(resolveDashboardForwardTarget("http://127.42.0.9:18789")).toBe("18789");
+    expect(resolveDashboardForwardTarget("http://localhost:18789")).toBe("18789");
+    expect(resolveDashboardForwardTarget("http://[::1]:18789")).toBe("18789");
+  });
+
+  it("uses a public bind target for non-loopback chat UI URLs", () => {
+    expect(resolveDashboardForwardTarget("https://chat.example.com")).toBe("0.0.0.0:18789");
+    expect(resolveDashboardForwardTarget("http://10.0.0.25:18789")).toBe("0.0.0.0:18789");
+  });
+});
 
 describe("onboard helpers", () => {
   it("builds a sandbox sync script that only writes nemoclaw config", () => {
