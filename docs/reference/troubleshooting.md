@@ -141,6 +141,26 @@ If neither is found, verify that Colima is running:
 $ colima status
 ```
 
+### `NVIDIA_API_KEY` prompt during onboard
+
+While `nemoclaw onboard` prompts for an `NVIDIA_API_KEY`, it is not a hard prerequisite to finish the onboarding process.
+You can proceed without a key; the CLI will prompt you again only when an operation specifically requires it (e.g., when routing inference to an NVIDIA-hosted model).
+
+If you have a key and want to set it manually, export it as an environment variable:
+
+```console
+$ export NVIDIA_API_KEY=nvapi-...
+```
+
+### How to update or reset the `NVIDIA_API_KEY`
+
+NemoClaw stores your API key in `~/.nemoclaw/credentials.json`.
+If you need to update it or if you entered an incorrect key during onboarding:
+
+1. **Environment Variable:** Export `NVIDIA_API_KEY` in your shell. This takes precedence over the stored credential.
+2. **Manual Edit:** Edit `~/.nemoclaw/credentials.json` directly and update the `apiKey` field.
+3. **Reset:** Delete the `~/.nemoclaw/credentials.json` file. The CLI will prompt you for a new key the next time one is required.
+
 ## Runtime
 
 ### Reconnect after a host reboot
