@@ -1,26 +1,21 @@
 ---
-title: Audit Logging
-description: Tamper-evident audit trail for NemoClaw gateway and orchestrator events.
-keywords:
-  - audit
-  - logging
-  - security
-  - hash chain
-topics:
-  - security
-  - observability
-tags:
-  - audit-logging
-  - tamper-evident
-content type: guide
-difficulty: intermediate
-audience: operators
+title:
+  page: "Tamper-Evident Audit Logging"
+  nav: "Audit Logging"
+description: "Tamper-evident audit trail for NemoClaw gateway and orchestrator events."
+keywords: ["nemoclaw audit logging", "tamper-evident logging", "hash chain", "security"]
+topics: ["generative_ai", "ai_agents"]
+tags: ["nemoclaw", "audit-logging", "tamper-evident", "security"]
+content:
+  type: reference
+  difficulty: intermediate
+  audience: ["developer", "engineer", "security_engineer"]
 status: draft
 ---
 
 <!--
-SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-SPDX-License-Identifier: Apache-2.0
+  SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
 -->
 
 # Audit Logging
@@ -44,6 +39,7 @@ The fix applies three independent layers of protection:
 
 2. **Append-only enforcement** — The `audit.jsonl` file has the `chattr +a` (append-only) attribute set at image build time.
    Even with group-write permission, the kernel prevents any operation other than appending.
+   On filesystems that do not support `chattr` (e.g., overlayfs in CI), the build falls back to DAC permissions only and logs a warning.
 
 3. **Hash chaining** — Each log entry includes a SHA-256 hash of its payload and a `prev_hash` field linking to the previous entry.
    Any modification breaks the chain and is detectable offline.
@@ -78,6 +74,6 @@ detail:  line 18: hash mismatch (tampering detected)
 
 ## Next Steps
 
-- [Sandbox Policy Reference](../reference/sandbox-policy.md) — Full list of filesystem and syscall restrictions.
-- [Deployment Guide](../guides/deployment.md) — How to configure log paths and permissions in production.
-- [Security Overview](index.md) — High-level security architecture of NemoClaw.
+- [Network Policies](../reference/network-policies.md) — Baseline network and filesystem rules enforced by the sandbox.
+- [Sandbox Hardening](../deployment/sandbox-hardening.md) — Additional image-level hardening measures.
+- [Architecture](../reference/architecture.md) — How the plugin, blueprint, and sandbox fit together.
