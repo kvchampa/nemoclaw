@@ -164,4 +164,5 @@ describe("local inference helpers", () => {
     );
     expect(result).toEqual({ ok: true });
   });
+
 });

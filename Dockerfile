@@ -54,6 +54,11 @@ ARG CHAT_UI_URL=http://127.0.0.1:18789
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_INFERENCE_API=openai-completions
 ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=
+# EXPERIMENTAL: small model mode reduces the system prompt for local inference.
+# When set to 1, writes compact workspace files and lowers bootstrap token budgets
+# so small local models (e.g. qwen2.5:0.5b via Ollama) have more capacity for
+# actual conversation instead of digesting a large system prompt.
+ARG NEMOCLAW_SMALL_MODEL_MODE=0
 # Unique per build to ensure each image gets a fresh auth token.
 # Pass --build-arg NEMOCLAW_BUILD_ID=$(date +%s) to bust the cache.
 ARG NEMOCLAW_BUILD_ID=default
@@ -67,7 +72,8 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     CHAT_UI_URL=${CHAT_UI_URL} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API} \
-    NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64}
+    NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64} \
+    NEMOCLAW_SMALL_MODEL_MODE=${NEMOCLAW_SMALL_MODEL_MODE}
 
 WORKDIR /sandbox
 USER sandbox
@@ -99,8 +105,13 @@ providers = { \
         'models': [{**({'compat': inference_compat} if inference_compat else {}), 'id': model, 'name': primary_model_ref, 'reasoning': False, 'input': ['text'], 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}, 'contextWindow': 131072, 'maxTokens': 4096}] \
     } \
 }; \
+small_model = os.environ.get('NEMOCLAW_SMALL_MODEL_MODE', '0') == '1'; \
+agent_defaults = {'model': {'primary': primary_model_ref}}; \
+if small_model: \
+    agent_defaults['bootstrapMaxChars'] = 4000; \
+    agent_defaults['bootstrapTotalMaxChars'] = 8000; \
 config = { \
-    'agents': {'defaults': {'model': {'primary': primary_model_ref}}}, \
+    'agents': {'defaults': agent_defaults}, \
     'models': {'mode': 'merge', 'providers': providers}, \
     'channels': {'defaults': {'configWrites': False}}, \
     'gateway': { \
@@ -121,6 +132,46 @@ os.chmod(path, 0o600)"
 # Install NemoClaw plugin into OpenClaw
 RUN openclaw doctor --fix > /dev/null 2>&1 || true \
     && openclaw plugins install /opt/nemoclaw > /dev/null 2>&1 || true
+
+# EXPERIMENTAL: small model mode — write compact workspace files so local models
+# spend fewer tokens on system prompt and more on actual conversation.
+# Users can still override these files inside the sandbox after creation.
+# hadolint ignore=SC2016
+RUN if [ "$NEMOCLAW_SMALL_MODEL_MODE" = "1" ]; then \
+      echo '[experimental] Small model mode: writing compact workspace files'; \
+      printf '%s\n' \
+        '# SOUL' \
+        '' \
+        'You are a helpful AI assistant running locally. Be concise and direct.' \
+        '' \
+        '- Answer questions accurately' \
+        '- Admit when you don'\''t know something' \
+        '- Keep responses short unless asked to elaborate' \
+        '- Use tools when available and appropriate' \
+        '- Never fabricate information' \
+        > /sandbox/.openclaw-data/workspace/SOUL.md; \
+      printf '%s\n' \
+        '# Agents' \
+        '' \
+        '## Startup' \
+        '' \
+        'Read these files if they exist:' \
+        '- `SOUL.md` — your behavioral rules' \
+        '- `USER.md` — context about the person you are helping' \
+        '' \
+        '## Rules' \
+        '' \
+        '- Safe to do freely: read files, search, organize workspace' \
+        '- Ask before: sending messages, deleting files, any external action' \
+        '- Never exfiltrate private data' \
+        '- Use `trash` instead of `rm`' \
+        '' \
+        '## Memory' \
+        '' \
+        'Write notes to `memory/YYYY-MM-DD.md` to remember things across sessions.' \
+        'Curate important facts into `MEMORY.md`.' \
+        > /sandbox/.openclaw-data/workspace/AGENTS.md; \
+    fi
 
 # Lock openclaw.json via DAC: chown to root so the sandbox user cannot modify
 # it at runtime.  This works regardless of Landlock enforcement status.

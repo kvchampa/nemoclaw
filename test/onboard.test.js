@@ -50,6 +50,7 @@ describe("onboard helpers", () => {
         "ARG NEMOCLAW_PRIMARY_MODEL_REF=nvidia/nemotron-3-super-120b-a12b",
         "ARG CHAT_UI_URL=http://127.0.0.1:18789",
         "ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=",
+        "ARG NEMOCLAW_SMALL_MODEL_MODE=0",
         "ARG NEMOCLAW_BUILD_ID=default",
       ].join("\n")
     );
@@ -76,6 +77,7 @@ describe("onboard helpers", () => {
         inferenceBaseUrl: "https://inference.local/v1",
         inferenceApi: "openai-completions",
         inferenceCompat: null,
+        smallModelMode: false,
       }
     );
   });
@@ -93,6 +95,7 @@ describe("onboard helpers", () => {
         "ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1",
         "ARG NEMOCLAW_INFERENCE_API=openai-completions",
         "ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=",
+        "ARG NEMOCLAW_SMALL_MODEL_MODE=0",
         "ARG NEMOCLAW_BUILD_ID=default",
       ].join("\n")
     );
@@ -127,6 +130,7 @@ describe("onboard helpers", () => {
         inferenceCompat: {
           supportsStore: false,
         },
+        smallModelMode: false,
       }
     );
   });
@@ -140,8 +144,73 @@ describe("onboard helpers", () => {
         inferenceBaseUrl: "https://inference.local/v1",
         inferenceApi: "openai-responses",
         inferenceCompat: null,
+        smallModelMode: false,
       }
     );
+  });
+
+  it("maps ollama-local to the routed inference provider with small model mode", () => {
+    assert.deepEqual(
+      getSandboxInferenceConfig("qwen2.5:7b", "ollama-local", "openai-completions"),
+      {
+        providerKey: "inference",
+        primaryModelRef: "inference/qwen2.5:7b",
+        inferenceBaseUrl: "https://inference.local/v1",
+        inferenceApi: "openai-completions",
+        inferenceCompat: null,
+        smallModelMode: true,
+      }
+    );
+  });
+
+  it("maps vllm-local to the routed inference provider with small model mode", () => {
+    assert.deepEqual(
+      getSandboxInferenceConfig("nemotron-3-nano:30b", "vllm-local", "openai-completions"),
+      {
+        providerKey: "inference",
+        primaryModelRef: "inference/nemotron-3-nano:30b",
+        inferenceBaseUrl: "https://inference.local/v1",
+        inferenceApi: "openai-completions",
+        inferenceCompat: null,
+        smallModelMode: true,
+      }
+    );
+  });
+
+  it("patches the staged Dockerfile with small model mode for ollama-local", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-dockerfile-ollama-"));
+    const dockerfilePath = path.join(tmpDir, "Dockerfile");
+    fs.writeFileSync(
+      dockerfilePath,
+      [
+        "ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b",
+        "ARG NEMOCLAW_PROVIDER_KEY=nvidia",
+        "ARG NEMOCLAW_PRIMARY_MODEL_REF=nvidia/nemotron-3-super-120b-a12b",
+        "ARG CHAT_UI_URL=http://127.0.0.1:18789",
+        "ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1",
+        "ARG NEMOCLAW_INFERENCE_API=openai-completions",
+        "ARG NEMOCLAW_INFERENCE_COMPAT_B64=e30=",
+        "ARG NEMOCLAW_SMALL_MODEL_MODE=0",
+        "ARG NEMOCLAW_BUILD_ID=default",
+      ].join("\n")
+    );
+
+    try {
+      patchStagedDockerfile(
+        dockerfilePath,
+        "qwen2.5:0.5b",
+        "http://127.0.0.1:18789",
+        "build-ollama",
+        "ollama-local"
+      );
+      const patched = fs.readFileSync(dockerfilePath, "utf8");
+      assert.match(patched, /^ARG NEMOCLAW_MODEL=qwen2\.5:0\.5b$/m);
+      assert.match(patched, /^ARG NEMOCLAW_PROVIDER_KEY=inference$/m);
+      assert.match(patched, /^ARG NEMOCLAW_PRIMARY_MODEL_REF=inference\/qwen2\.5:0\.5b$/m);
+      assert.match(patched, /^ARG NEMOCLAW_SMALL_MODEL_MODE=1$/m);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it("pins the gateway image to the installed OpenShell release version", () => {
