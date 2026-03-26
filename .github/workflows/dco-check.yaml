@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: dco-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dco-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check DCO sign-off
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          failed=0
+          bad=""
+          for sha in $(git rev-list --no-merges "origin/$BASE_REF".."$HEAD_SHA"); do
+            author_email="$(git log -1 --format="%ae" "$sha")"
+            signoff_emails="$(git log -1 --format="%B" "$sha" | grep -oP "^Signed-off-by: .+ <\K[^>]+" || true)"
+
+            if [ -z "$signoff_emails" ]; then
+              bad+="  $(git log -1 --oneline "$sha")  (missing Signed-off-by)\n"
+              failed=1
+            elif ! echo "$signoff_emails" | grep -qxF "$author_email"; then
+              bad+="  $(git log -1 --oneline "$sha")  (no sign-off matches author <$author_email>)\n"
+              failed=1
+            fi
+          done
+          if [ "$failed" -eq 1 ]; then
+            echo ""
+            echo "DCO check failed -- the following commits have sign-off problems:"
+            echo ""
+            printf "$bad"
+            echo ""
+            echo "The Developer Certificate of Origin (DCO) requires all commits to include a"
+            echo "Signed-off-by trailer whose email matches the commit author email."
+            echo "See: https://developercertificate.org/"
+            echo ""
+            echo "How to fix:"
+            echo ""
+            echo "  If your PR has ONE commit (or you squash):"
+            echo "    git commit --amend -s"
+            echo "    git push --force-with-lease"
+            echo ""
+            echo "  If your PR has MULTIPLE commits:"
+            echo "    git rebase --signoff HEAD~N   (where N = number of commits in your PR)"
+            echo "    git push --force-with-lease"
+            echo ""
+            echo "  To sign off automatically on all future commits:"
+            echo "    git config alias.cs 'commit -s'"
+            exit 1
+          fi
+          echo "All commits have valid DCO sign-off"
