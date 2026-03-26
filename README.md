@@ -257,7 +257,7 @@ NemoClaw is an open project — we are still determining which presets to ship b
 
 When the agent attempts to reach an endpoint not covered by the policy, OpenShell blocks the request and surfaces it in the TUI (`openshell term`) for the operator to approve or deny in real time. Approved endpoints persist for the current session only.
 
-For step-by-step instructions, see [Customize Network Policy](https://docs.nvidia.com/nemoclaw/latest/network-policy/customize-network-policy.html). For the underlying enforcement details, see the OpenShell [Policy Schema](https://docs.nvidia.com/openshell/latest/reference/policy-schema.html) and [Sandbox Policies](https://docs.nvidia.com/openshell/latest/sandboxes/policies.html) documentation.
+For step-by-step instructions, see [Customize Network Policy](docs/network-policy/customize-network-policy.md). For the underlying enforcement details, see the OpenShell [Policy Schema](https://docs.nvidia.com/openshell/latest/reference/policy-schema.html) and [Sandbox Policies](https://docs.nvidia.com/openshell/latest/sandboxes/policies.html) documentation.
 
 ---
 
@@ -274,7 +274,7 @@ Run these on the host to set up, connect to, and manage sandboxes.
 | `openshell term`                     | Launch the OpenShell TUI for monitoring and approvals. |
 | `nemoclaw start` / `stop` / `status` | Manage auxiliary services (Telegram bridge, tunnel).   |
 
-See the full [CLI reference](https://docs.nvidia.com/nemoclaw/latest/reference/commands.html) for all commands, flags, and options.
+See the full [CLI reference](docs/reference/commands.md) for all commands, flags, and options.
 
 ---
 
@@ -282,13 +282,13 @@ See the full [CLI reference](https://docs.nvidia.com/nemoclaw/latest/reference/c
 
 Refer to the documentation for more information on NemoClaw.
 
-- [Overview](https://docs.nvidia.com/nemoclaw/latest/about/overview.html): Learn what NemoClaw does and how it fits together.
-- [How It Works](https://docs.nvidia.com/nemoclaw/latest/about/how-it-works.html): Learn about the plugin, blueprint, and sandbox lifecycle.
-- [Architecture](https://docs.nvidia.com/nemoclaw/latest/reference/architecture.html): Learn about the plugin structure, blueprint lifecycle, and sandbox environment.
-- [Inference Profiles](https://docs.nvidia.com/nemoclaw/latest/reference/inference-profiles.html): Learn how NemoClaw configures routed inference providers.
-- [Network Policies](https://docs.nvidia.com/nemoclaw/latest/reference/network-policies.html): Learn about egress control and policy customization.
-- [CLI Commands](https://docs.nvidia.com/nemoclaw/latest/reference/commands.html): Learn about the full command reference.
-- [Troubleshooting](https://docs.nvidia.com/nemoclaw/latest/reference/troubleshooting.html): Troubleshoot common issues and resolution steps.
+- [Overview](docs/about/overview.md): Learn what NemoClaw does and how it fits together.
+- [How It Works](docs/about/how-it-works.md): Learn about the plugin, blueprint, and sandbox lifecycle.
+- [Architecture](docs/reference/architecture.md): Learn about the plugin structure, blueprint lifecycle, and sandbox environment.
+- [Inference Profiles](docs/reference/inference-profiles.md): Learn how NemoClaw configures routed inference providers.
+- [Network Policies](docs/reference/network-policies.md): Learn about egress control and policy customization.
+- [CLI Commands](docs/reference/commands.md): Learn about the full command reference.
+- [Troubleshooting](docs/reference/troubleshooting.md): Troubleshoot common issues and resolution steps.
 - [Discord](https://discord.gg/XFpfPv9Uvx): Join the community for questions and discussion.
 
 ## License
