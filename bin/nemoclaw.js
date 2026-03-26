@@ -38,7 +38,7 @@ const { parseGatewayInference } = require("./lib/inference-config");
 
 const GLOBAL_COMMANDS = new Set([
   "onboard", "list", "deploy", "setup", "setup-spark",
-  "start", "stop", "status", "debug", "uninstall",
+  "start", "stop", "status", "reconnect", "debug", "uninstall",
   "help", "--help", "-h", "--version", "-v",
 ]);
 
@@ -134,7 +134,7 @@ async function recoverNamedGatewayRuntime() {
   }
 
   const shouldStartGateway = [before.state, after.state].some((state) =>
-    ["named_unhealthy", "named_unreachable", "connected_other"].includes(state)
+    ["named_unhealthy", "named_unreachable", "connected_other", "missing_named"].includes(state)
   );
 
   if (shouldStartGateway) {
@@ -557,6 +557,16 @@ function listSandboxes() {
   console.log("");
 }
 
+function resolveReconnectSandboxName(requestedName) {
+  const sandboxName = requestedName || registry.getDefault();
+  if (!sandboxName) {
+    console.error("  No sandbox registered. Run `nemoclaw onboard` to create one first.");
+    process.exit(1);
+  }
+  validateName(sandboxName, "sandbox name");
+  return sandboxName;
+}
+
 // ── Sandbox-scoped actions ───────────────────────────────────────
 
 async function sandboxConnect(sandboxName) {
@@ -569,6 +579,12 @@ async function sandboxConnect(sandboxName) {
     env: process.env,
   });
   exitWithSpawnResult(result);
+}
+
+async function reconnect(args = []) {
+  const sandboxName = resolveReconnectSandboxName(args[0]);
+  console.log(`  Reconnecting to sandbox '${sandboxName}'...`);
+  await sandboxConnect(sandboxName);
 }
 
 // eslint-disable-next-line complexity
@@ -721,6 +737,7 @@ function help() {
 
   ${G}Sandbox Management:${R}
     ${B}nemoclaw list${R}                    List all sandboxes
+    nemoclaw reconnect ${D}[name]${R}        Recover the default or named sandbox after a reboot
     nemoclaw <name> connect          Shell into a running sandbox
     nemoclaw <name> status           Sandbox health + NIM status
     nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
@@ -778,6 +795,7 @@ const [cmd, ...args] = process.argv.slice(2);
       case "start":       await start(); break;
       case "stop":        stop(); break;
       case "status":      showStatus(); break;
+      case "reconnect":   await reconnect(args); break;
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
       case "list":        listSandboxes(); break;
