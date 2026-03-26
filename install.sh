@@ -21,15 +21,40 @@ resolve_installer_version() {
 
 NEMOCLAW_VERSION="$(resolve_installer_version)"
 
+# Resolve which Git ref to install from.
+# Priority: NEMOCLAW_INSTALL_TAG env var > GitHub releases API > "main" fallback.
+resolve_release_tag() {
+  # Allow explicit override (for CI, pinning, or testing).
+  if [[ -n "${NEMOCLAW_INSTALL_TAG:-}" ]]; then
+    printf "%s" "$NEMOCLAW_INSTALL_TAG"
+    return 0
+  fi
+
+  # Query the GitHub releases API for the latest published release.
+  local response tag
+  response="$(curl -fsSL --max-time 10 \
+    https://api.github.com/repos/NVIDIA/NemoClaw/releases/latest 2>/dev/null)" || true
+  tag="$(printf '%s' "$response" \
+    | grep '"tag_name"' \
+    | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/' \
+    | head -1 || true)"
+
+  if [[ -n "$tag" && "$tag" =~ ^v[0-9] ]]; then
+    printf "%s" "$tag"
+  else
+    printf "main"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Color / style — disabled when NO_COLOR is set or stdout is not a TTY.
 # Uses exact NVIDIA green #76B900 on truecolor terminals; 256-color otherwise.
 # ---------------------------------------------------------------------------
 if [[ -z "${NO_COLOR:-}" && -t 1 ]]; then
   if [[ "${COLORTERM:-}" == "truecolor" || "${COLORTERM:-}" == "24bit" ]]; then
-    C_GREEN=$'\033[38;2;118;185;0m'   # #76B900 — exact NVIDIA green
+    C_GREEN=$'\033[38;2;118;185;0m' # #76B900 — exact NVIDIA green
   else
-    C_GREEN=$'\033[38;5;148m'          # closest 256-color on dark backgrounds
+    C_GREEN=$'\033[38;5;148m' # closest 256-color on dark backgrounds
   fi
   C_BOLD=$'\033[1m'
   C_DIM=$'\033[2m'
@@ -44,10 +69,13 @@ fi
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-info()  { printf "${C_CYAN}[INFO]${C_RESET}  %s\n" "$*"; }
-warn()  { printf "${C_YELLOW}[WARN]${C_RESET}  %s\n" "$*"; }
-error() { printf "${C_RED}[ERROR]${C_RESET} %s\n" "$*" >&2; exit 1; }
-ok()    { printf "  ${C_GREEN}✓${C_RESET}  %s\n" "$*"; }
+info() { printf "${C_CYAN}[INFO]${C_RESET}  %s\n" "$*"; }
+warn() { printf "${C_YELLOW}[WARN]${C_RESET}  %s\n" "$*"; }
+error() {
+  printf "${C_RED}[ERROR]${C_RESET} %s\n" "$*" >&2
+  exit 1
+}
+ok() { printf "  ${C_GREEN}✓${C_RESET}  %s\n" "$*"; }
 
 resolve_default_sandbox_name() {
   local registry_file="${HOME}/.nemoclaw/sandboxes.json"
@@ -95,7 +123,7 @@ print_banner() {
 }
 
 print_done() {
-  local elapsed=$(( SECONDS - _INSTALL_START ))
+  local elapsed=$((SECONDS - _INSTALL_START))
   local sandbox_name
   sandbox_name="$(resolve_default_sandbox_name)"
   info "=== Installation complete ==="
@@ -123,12 +151,13 @@ usage() {
   printf "  ${C_DIM}Options:${C_RESET}\n"
   printf "    --non-interactive    Skip prompts (uses env vars / defaults)\n"
   printf "    --version, -v        Print installer version and exit\n"
-  printf "    --help               Show this help message and exit\n\n"
+  printf "    --help, -h           Show this help message and exit\n\n"
   printf "  ${C_DIM}Environment:${C_RESET}\n"
   printf "    NVIDIA_API_KEY                API key (skips credential prompt)\n"
   printf "    NEMOCLAW_NON_INTERACTIVE=1    Same as --non-interactive\n"
   printf "    NEMOCLAW_SANDBOX_NAME         Sandbox name to create/use\n"
   printf "    NEMOCLAW_RECREATE_SANDBOX=1   Recreate an existing sandbox\n"
+  printf "    NEMOCLAW_INSTALL_TAG         Git ref to install (default: latest release)\n"
   printf "    NEMOCLAW_PROVIDER             cloud | ollama | nim | vllm\n"
   printf "    NEMOCLAW_MODEL                Inference model to configure\n"
   printf "    NEMOCLAW_POLICY_MODE          suggested | custom | skip\n"
@@ -146,7 +175,8 @@ usage() {
 #   Stdout/stderr are captured; dumped only on failure.
 #   Falls back to plain output when stdout is not a TTY (CI / piped installs).
 spin() {
-  local msg="$1"; shift
+  local msg="$1"
+  shift
 
   if [[ ! -t 1 ]]; then
     info "$msg"
@@ -154,7 +184,8 @@ spin() {
     return
   fi
 
-  local log; log=$(mktemp)
+  local log
+  log=$(mktemp)
   "$@" >"$log" 2>&1 &
   local pid=$! i=0
   local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
@@ -191,18 +222,22 @@ ORIGINAL_PATH="${PATH:-}"
 
 # Compare two semver strings (major.minor.patch). Returns 0 if $1 >= $2.
 version_gte() {
-  local IFS=.
-  local -a a=($1) b=($2)
+  local -a a b
+  IFS=. read -ra a <<<"$1"
+  IFS=. read -ra b <<<"$2"
   for i in 0 1 2; do
     local ai=${a[$i]:-0} bi=${b[$i]:-0}
-    if (( ai > bi )); then return 0; fi
-    if (( ai < bi )); then return 1; fi
+    if ((ai > bi)); then return 0; fi
+    if ((ai < bi)); then return 1; fi
   done
   return 0
 }
 
 # Ensure nvm environment is loaded in the current shell.
+# Skip if node is already on PATH — sourcing nvm.sh can reset PATH and
+# override the caller's node/npm (e.g. in test environments with stubs).
 ensure_nvm_loaded() {
+  command -v node &>/dev/null && return 0
   if [[ -z "${NVM_DIR:-}" ]]; then
     export NVM_DIR="$HOME/.nvm"
   fi
@@ -265,7 +300,7 @@ ensure_supported_runtime() {
   [[ "$node_major" =~ ^[0-9]+$ ]] || error "Could not determine Node.js version from '${node_version}'. ${RUNTIME_REQUIREMENT_MSG}"
   [[ "$npm_major" =~ ^[0-9]+$ ]] || error "Could not determine npm version from '${npm_version}'. ${RUNTIME_REQUIREMENT_MSG}"
 
-  if (( node_major < MIN_NODE_MAJOR || npm_major < MIN_NPM_MAJOR )); then
+  if ((node_major < MIN_NODE_MAJOR || npm_major < MIN_NPM_MAJOR)); then
     error "Unsupported runtime detected: Node.js ${node_version:-unknown}, npm ${npm_version:-unknown}. ${RUNTIME_REQUIREMENT_MSG} Upgrade Node.js and rerun the installer."
   fi
 
@@ -288,7 +323,10 @@ install_nodejs() {
   local nvm_tmp
   nvm_tmp="$(mktemp)"
   curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$nvm_tmp" \
-    || { rm -f "$nvm_tmp"; error "Failed to download nvm installer"; }
+    || {
+      rm -f "$nvm_tmp"
+      error "Failed to download nvm installer"
+    }
   local actual_hash
   if command_exists sha256sum; then
     actual_hash="$(sha256sum "$nvm_tmp" | awk '{print $1}')"
@@ -296,7 +334,7 @@ install_nodejs() {
     actual_hash="$(shasum -a 256 "$nvm_tmp" | awk '{print $1}')"
   else
     warn "No SHA-256 tool found — skipping nvm integrity check"
-    actual_hash="$NVM_SHA256"  # allow execution
+    actual_hash="$NVM_SHA256" # allow execution
   fi
   if [[ "$actual_hash" != "$NVM_SHA256" ]]; then
     rm -f "$nvm_tmp"
@@ -341,7 +379,7 @@ get_vram_mb() {
   if [[ "$(uname -s)" == "Darwin" ]] && command_exists sysctl; then
     local bytes
     bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
-    echo $(( bytes / 1024 / 1024 ))
+    echo $((bytes / 1024 / 1024))
     return
   fi
   echo 0
@@ -373,10 +411,10 @@ install_or_upgrade_ollama() {
   # Pull the appropriate model based on VRAM
   local vram_mb
   vram_mb=$(get_vram_mb)
-  local vram_gb=$(( vram_mb / 1024 ))
+  local vram_gb=$((vram_mb / 1024))
   info "Detected ${vram_gb} GB VRAM"
 
-  if (( vram_gb >= 120 )); then
+  if ((vram_gb >= 120)); then
     info "Pulling nemotron-3-super:120b…"
     ollama pull nemotron-3-super:120b
   else
@@ -406,13 +444,12 @@ pre_extract_openclaw() {
   info "Pre-extracting openclaw@${openclaw_version} with system tar (GH-503 workaround)…"
   local tmpdir
   tmpdir="$(mktemp -d)"
-  if npm pack "openclaw@${openclaw_version}" --pack-destination "$tmpdir" > /dev/null 2>&1; then
+  if npm pack "openclaw@${openclaw_version}" --pack-destination "$tmpdir" >/dev/null 2>&1; then
     local tgz
     tgz="$(find "$tmpdir" -maxdepth 1 -name 'openclaw-*.tgz' -print -quit)"
     if [[ -n "$tgz" && -f "$tgz" ]]; then
       if mkdir -p "${install_dir}/node_modules/openclaw" \
-        && tar xzf "$tgz" -C "${install_dir}/node_modules/openclaw" --strip-components=1
-      then
+        && tar xzf "$tgz" -C "${install_dir}/node_modules/openclaw" --strip-components=1; then
         info "openclaw pre-extracted successfully"
       else
         warn "Failed to extract openclaw tarball"
@@ -433,27 +470,32 @@ pre_extract_openclaw() {
 }
 
 install_nemoclaw() {
+  command_exists git || error "git was not found on PATH."
   if [[ -f "./package.json" ]] && grep -q '"name": "nemoclaw"' ./package.json 2>/dev/null; then
     info "NemoClaw package.json found in current directory — installing from source…"
-    spin "Preparing OpenClaw package" bash -lc "$(declare -f pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$(pwd)" || \
-      warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
+    spin "Preparing OpenClaw package" bash -c "$(declare -f info warn pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$(pwd)" \
+      || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     spin "Installing NemoClaw dependencies" npm install --ignore-scripts
-    spin "Building NemoClaw plugin" bash -lc 'cd nemoclaw && npm install --ignore-scripts && npm run build'
+    spin "Building NemoClaw plugin" bash -c 'cd nemoclaw && npm install --ignore-scripts && npm run build'
     spin "Linking NemoClaw CLI" npm link
   else
     info "Installing NemoClaw from GitHub…"
+    # Resolve the latest release tag so we never install raw main.
+    local release_ref
+    release_ref="$(resolve_release_tag)"
+    info "Resolved install ref: ${release_ref}"
     # Clone first so we can pre-extract openclaw before npm install (GH-503).
     # npm install -g git+https://... does this internally but we can't hook
     # into its extraction pipeline, so we do it ourselves.
     local nemoclaw_src="${HOME}/.nemoclaw/source"
     rm -rf "$nemoclaw_src"
     mkdir -p "$(dirname "$nemoclaw_src")"
-    spin "Cloning NemoClaw source" git clone --depth 1 https://github.com/NVIDIA/NemoClaw.git "$nemoclaw_src"
-    spin "Preparing OpenClaw package" bash -lc "$(declare -f pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$nemoclaw_src" || \
-      warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
-    spin "Installing NemoClaw dependencies" bash -lc "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
-    spin "Building NemoClaw plugin" bash -lc "cd \"$nemoclaw_src\"/nemoclaw && npm install --ignore-scripts && npm run build"
-    spin "Linking NemoClaw CLI" bash -lc "cd \"$nemoclaw_src\" && npm link"
+    spin "Cloning NemoClaw source" git clone --depth 1 --branch "$release_ref" https://github.com/NVIDIA/NemoClaw.git "$nemoclaw_src"
+    spin "Preparing OpenClaw package" bash -c "$(declare -f info warn pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$nemoclaw_src" \
+      || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
+    spin "Installing NemoClaw dependencies" bash -c "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
+    spin "Building NemoClaw plugin" bash -c "cd \"$nemoclaw_src\"/nemoclaw && npm install --ignore-scripts && npm run build"
+    spin "Linking NemoClaw CLI" bash -c "cd \"$nemoclaw_src\" && npm link"
   fi
 
   refresh_path
@@ -518,7 +560,7 @@ run_onboard() {
   fi
 }
 
-# 6. Post-install message
+# 6. Post-install message (printed last — after onboarding — so PATH hints stay visible)
 # ---------------------------------------------------------------------------
 post_install_message() {
   # Only show shell reload instructions when Node was installed via a
@@ -558,9 +600,18 @@ main() {
   for arg in "$@"; do
     case "$arg" in
       --non-interactive) NON_INTERACTIVE=1 ;;
-      --version|-v) printf "nemoclaw-installer v%s\n" "$NEMOCLAW_VERSION"; exit 0 ;;
-      --help|-h) usage; exit 0 ;;
-      *) usage; error "Unknown option: $arg" ;;
+      --version | -v)
+        printf "nemoclaw-installer v%s\n" "$NEMOCLAW_VERSION"
+        exit 0
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      *)
+        usage
+        error "Unknown option: $arg"
+        ;;
     esac
   done
   # Also honor env var
@@ -578,7 +629,6 @@ main() {
   # install_or_upgrade_ollama
   install_nemoclaw
   verify_nemoclaw
-  post_install_message
 
   step 3 "Onboarding"
   if command_exists nemoclaw; then
@@ -588,6 +638,9 @@ main() {
   fi
 
   print_done
+  post_install_message
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]:-}" == "$0" ]] || { [[ -z "${BASH_SOURCE[0]:-}" ]] && { [[ "$0" == "bash" ]] || [[ "$0" == "-bash" ]]; }; }; then
+  main "$@"
+fi
