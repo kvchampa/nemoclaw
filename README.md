@@ -263,7 +263,7 @@ Operators can customize the policy in two ways:
 | Method | How | Scope |
 |--------|-----|-------|
 | **Static** | Edit `openclaw-sandbox.yaml` and re-run `nemoclaw onboard`. | Persists across restarts. |
-| **Dynamic** | Run `openshell policy set <policy-file>` on a running sandbox. | Session only; resets on restart. |
+| **Dynamic** | Run `openshell policy set --policy <policy-file> <sandbox-name>` on a running sandbox. | Session only; resets on restart. |
 
 NemoClaw includes preset policy files for common integrations such as PyPI, Docker Hub, Slack, and Jira in `nemoclaw-blueprint/policies/presets/`. Apply a preset as-is or use it as a starting template.
 
