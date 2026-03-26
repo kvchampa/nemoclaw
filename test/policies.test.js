@@ -10,6 +10,7 @@ describe("policies", () => {
     it("returns all 9 presets", () => {
       const presets = policies.listPresets();
       expect(presets.length).toBe(9);
+
     });
 
     it("each preset has name and description", () => {
@@ -36,6 +37,7 @@ describe("policies", () => {
         "telegram",
       ];
       expect(names).toEqual(expected);
+
     });
   });
 
@@ -136,6 +138,7 @@ describe("policies", () => {
     });
   });
 
+
   describe("preset YAML schema", () => {
     it("no preset has rules at NetworkPolicyRuleDef level", () => {
       // rules must be inside endpoints, not as sibling of endpoints/binaries
@@ -188,6 +191,34 @@ describe("policies", () => {
         expect(content.includes("binaries:")).toBe(true);
         expect(content.includes(expectedBinary)).toBe(true);
       }
+    });
+
+    it("every preset has a binaries section (ref: #676)", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        expect(content.includes("binaries:")).toBeTruthy();
+      }
+    });
+
+    it("every preset binaries section includes openclaw", () => {
+      const skip = ["npm", "pypi"];
+      for (const p of policies.listPresets()) {
+        if (skip.includes(p.name)) continue;
+        const content = policies.loadPreset(p.name);
+        expect(content.includes("/usr/local/bin/openclaw")).toBeTruthy();
+      }
+    });
+
+    it("package manager presets include their tool binaries", () => {
+      const npmContent = policies.loadPreset("npm");
+      expect(npmContent.includes("/usr/local/bin/npm")).toBeTruthy();
+      expect(npmContent.includes("/usr/local/bin/node")).toBeTruthy();
+
+      const pypiContent = policies.loadPreset("pypi");
+      expect(pypiContent.includes("/usr/bin/pip")).toBeTruthy();
+
+      const dockerContent = policies.loadPreset("docker");
+      expect(dockerContent.includes("/usr/bin/docker")).toBeTruthy();
     });
   });
 });

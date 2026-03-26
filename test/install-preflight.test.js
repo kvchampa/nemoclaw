@@ -266,13 +266,31 @@ exit 98
 `,
     );
 
+    // Create a filtered system bin directory that excludes any real
+    // nemoclaw binary, so the installer's post-install verification
+    // fails and prints the HTTPS GitHub remediation URL.
+    const safeSystemBin = path.join(tmp, "safe-system-bin");
+    fs.mkdirSync(safeSystemBin);
+    for (const dir of TEST_SYSTEM_PATH.split(":")) {
+      try {
+        for (const entry of fs.readdirSync(dir)) {
+          if (entry === "nemoclaw") continue;
+          const src = path.join(dir, entry);
+          const dst = path.join(safeSystemBin, entry);
+          if (!fs.existsSync(dst)) {
+            try { fs.symlinkSync(src, dst); } catch (_e) { /* best effort */ }
+          }
+        }
+      } catch (_e) { /* best effort */ }
+    }
+
     const result = spawnSync("bash", [INSTALLER], {
       cwd: tmp,
       encoding: "utf-8",
       env: {
         ...process.env,
         HOME: tmp,
-        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        PATH: `${fakeBin}:${safeSystemBin}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
         NPM_PREFIX: prefix,
       },

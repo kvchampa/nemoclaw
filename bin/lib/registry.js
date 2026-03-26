@@ -3,24 +3,17 @@
 //
 // Multi-sandbox registry at ~/.nemoclaw/sandboxes.json
 
-const fs = require("fs");
 const path = require("path");
+const { readConfigFile, writeConfigFile } = require("./config-io");
 
 const REGISTRY_FILE = path.join(process.env.HOME || "/tmp", ".nemoclaw", "sandboxes.json");
 
 function load() {
-  try {
-    if (fs.existsSync(REGISTRY_FILE)) {
-      return JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf-8"));
-    }
-  } catch { /* ignored */ }
-  return { sandboxes: {}, defaultSandbox: null };
+  return readConfigFile(REGISTRY_FILE, { sandboxes: {}, defaultSandbox: null });
 }
 
 function save(data) {
-  const dir = path.dirname(REGISTRY_FILE);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  writeConfigFile(REGISTRY_FILE, data);
 }
 
 function getSandbox(name) {

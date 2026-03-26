@@ -480,7 +480,11 @@ if ! command -v nemoclaw >/dev/null 2>&1; then
     warn "  echo 'export PATH=\"$npm_bin:\$PATH\"' >> ~/.zshrc"
     warn "  source ~/.zshrc"
   else
-    fail "nemoclaw installation failed. Binary not found."
+    warn "nemoclaw installation failed. Binary not found."
+    warn ""
+    warn "You can try installing manually:"
+    warn "  npm install -g git+https://github.com/NVIDIA/NemoClaw.git"
+    exit 1
   fi
 fi
 

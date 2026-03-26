@@ -1,28 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
 const { execSync } = require("child_process");
+const { readConfigFile, writeConfigFile } = require("./config-io");
 
 const CREDS_DIR = path.join(process.env.HOME || "/tmp", ".nemoclaw");
 const CREDS_FILE = path.join(CREDS_DIR, "credentials.json");
 
 function loadCredentials() {
-  try {
-    if (fs.existsSync(CREDS_FILE)) {
-      return JSON.parse(fs.readFileSync(CREDS_FILE, "utf-8"));
-    }
-  } catch { /* ignored */ }
-  return {};
+  return readConfigFile(CREDS_FILE, {});
 }
 
 function saveCredential(key, value) {
-  fs.mkdirSync(CREDS_DIR, { recursive: true, mode: 0o700 });
   const creds = loadCredentials();
   creds[key] = value;
-  fs.writeFileSync(CREDS_FILE, JSON.stringify(creds, null, 2), { mode: 0o600 });
+  writeConfigFile(CREDS_FILE, creds);
 }
 
 function getCredential(key) {
