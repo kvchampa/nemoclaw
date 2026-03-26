@@ -77,21 +77,50 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 # --- 3. openshell CLI (binary release, not pip) ---
+OPENSHELL_VERSION="v0.0.14"
 if ! command -v openshell >/dev/null 2>&1; then
-  info "Installing openshell CLI from GitHub release..."
+  info "Installing openshell CLI (${OPENSHELL_VERSION})..."
   if ! command -v gh >/dev/null 2>&1; then
     sudo apt-get update -qq >/dev/null 2>&1
     sudo apt-get install -y -qq gh >/dev/null 2>&1
   fi
   ARCH="$(uname -m)"
   case "$ARCH" in
-    x86_64 | amd64) ASSET="openshell-x86_64-unknown-linux-musl.tar.gz" ;;
-    aarch64 | arm64) ASSET="openshell-aarch64-unknown-linux-musl.tar.gz" ;;
+    x86_64 | amd64)
+      ASSET="openshell-x86_64-unknown-linux-musl.tar.gz"
+      EXPECTED_SHA="f34acf072452180adc872db207eec16f2aa77b6e2723c7456677c281d7d1d9d6"
+      ;;
+    aarch64 | arm64)
+      ASSET="openshell-aarch64-unknown-linux-musl.tar.gz"
+      EXPECTED_SHA="6c70bd3112ba6524c16718b0ba37474238011d74c694b2f18aa6003da13128a5"
+      ;;
     *) fail "Unsupported architecture: $ARCH" ;;
   esac
   tmpdir="$(mktemp -d)"
-  GH_TOKEN="${GITHUB_TOKEN:-}" gh release download --repo NVIDIA/OpenShell \
-    --pattern "$ASSET" --dir "$tmpdir"
+  DOWNLOAD_SUCCESS=0
+
+  if command -v gh >/dev/null 2>&1; then
+    if GH_TOKEN="${GITHUB_TOKEN:-}" gh release download "$OPENSHELL_VERSION" --repo NVIDIA/OpenShell \
+      --pattern "$ASSET" --dir "$tmpdir"; then
+      DOWNLOAD_SUCCESS=1
+    fi
+  fi
+
+  if [ "$DOWNLOAD_SUCCESS" -eq 0 ]; then
+    # Fallback: curl pinned release
+    curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/${OPENSHELL_VERSION}/$ASSET" \
+      -o "$tmpdir/$ASSET"
+  fi
+
+  # Verify checksum
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/$ASSET" | sha256sum -c -
+  elif command -v shasum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/$ASSET" | shasum -a 256 -c -
+  else
+    fail "sha256sum or shasum not found. Cannot verify binary integrity."
+  fi
+
   tar xzf "$tmpdir/$ASSET" -C "$tmpdir"
   sudo install -m 755 "$tmpdir/openshell" /usr/local/bin/openshell
   rm -rf "$tmpdir"
@@ -101,16 +130,33 @@ else
 fi
 
 # --- 3b. cloudflared (for public tunnel) ---
+CLOUDFLARED_VERSION="2025.2.0"
 if ! command -v cloudflared >/dev/null 2>&1; then
-  info "Installing cloudflared..."
+  info "Installing cloudflared (${CLOUDFLARED_VERSION})..."
   CF_ARCH="$(uname -m)"
   case "$CF_ARCH" in
-    x86_64 | amd64) CF_ARCH="amd64" ;;
-    aarch64 | arm64) CF_ARCH="arm64" ;;
+    x86_64 | amd64)
+      CF_BIN_ARCH="amd64"
+      EXPECTED_SHA="cbd18c5a6dee084db7a55d761b91202e47e63ddbd18d0faff04ca96e56739b3f"
+      ;;
+    aarch64 | arm64)
+      CF_BIN_ARCH="arm64"
+      EXPECTED_SHA="92b8917aeb655ef8b9e90176dd9475b40ea85ec54b21bcafbdf57d9a68b72d15"
+      ;;
     *) fail "Unsupported architecture for cloudflared: $CF_ARCH" ;;
   esac
   tmpdir=$(mktemp -d)
-  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" -o "$tmpdir/cloudflared"
+  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${CF_BIN_ARCH}" -o "$tmpdir/cloudflared"
+
+  # Verify checksum
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/cloudflared" | sha256sum -c -
+  elif command -v shasum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/cloudflared" | shasum -a 256 -c -
+  else
+    fail "sha256sum or shasum not found. Cannot verify binary integrity."
+  fi
+
   sudo install -m 755 "$tmpdir/cloudflared" /usr/local/bin/cloudflared
   rm -rf "$tmpdir"
   info "cloudflared $(cloudflared --version 2>&1 | head -1) installed"

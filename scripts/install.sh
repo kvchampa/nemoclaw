@@ -323,31 +323,58 @@ install_openshell() {
     return 0
   fi
 
-  info "Installing openshell CLI..."
+  OPENSHELL_VERSION="v0.0.14"
+  info "Installing openshell CLI (${OPENSHELL_VERSION})..."
 
   case "$OS" in
     Darwin)
       case "$ARCH_LABEL" in
-        x86_64) ASSET="openshell-x86_64-apple-darwin.tar.gz" ;;
-        aarch64) ASSET="openshell-aarch64-apple-darwin.tar.gz" ;;
+        aarch64)
+          ASSET="openshell-aarch64-apple-darwin.tar.gz"
+          EXPECTED_SHA="f05699b74a9c60f105b7af9224f268f126256196d066de91b423bfa5be066eca"
+          ;;
+        *)
+          fail "OpenShell ${OPENSHELL_VERSION} does not support Intel-based Macs (x86_64). Please use an Apple Silicon Mac or build OpenShell from source."
+          ;;
       esac
       ;;
     Linux)
       case "$ARCH_LABEL" in
-        x86_64) ASSET="openshell-x86_64-unknown-linux-musl.tar.gz" ;;
-        aarch64) ASSET="openshell-aarch64-unknown-linux-musl.tar.gz" ;;
+        x86_64)
+          ASSET="openshell-x86_64-unknown-linux-musl.tar.gz"
+          EXPECTED_SHA="f34acf072452180adc872db207eec16f2aa77b6e2723c7456677c281d7d1d9d6"
+          ;;
+        aarch64)
+          ASSET="openshell-aarch64-unknown-linux-musl.tar.gz"
+          EXPECTED_SHA="6c70bd3112ba6524c16718b0ba37474238011d74c694b2f18aa6003da13128a5"
+          ;;
       esac
       ;;
   esac
 
   tmpdir="$(mktemp -d)"
+  local DOWNLOAD_SUCCESS=0
+
   if command -v gh >/dev/null 2>&1; then
-    GH_TOKEN="${GITHUB_TOKEN:-}" gh release download --repo NVIDIA/OpenShell \
-      --pattern "$ASSET" --dir "$tmpdir"
-  else
-    # Fallback: curl latest release
-    curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/latest/download/$ASSET" \
+    if GH_TOKEN="${GITHUB_TOKEN:-}" gh release download "${OPENSHELL_VERSION}" --repo NVIDIA/OpenShell \
+      --pattern "$ASSET" --dir "$tmpdir"; then
+      DOWNLOAD_SUCCESS=1
+    fi
+  fi
+
+  if [ "$DOWNLOAD_SUCCESS" -eq 0 ]; then
+    # Fallback: curl pinned release
+    curl -fsSL "https://github.com/NVIDIA/OpenShell/releases/download/${OPENSHELL_VERSION}/$ASSET" \
       -o "$tmpdir/$ASSET"
+  fi
+
+  # Verify checksum
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/$ASSET" | sha256sum -c -
+  elif command -v shasum >/dev/null 2>&1; then
+    echo "${EXPECTED_SHA}  $tmpdir/$ASSET" | shasum -a 256 -c -
+  else
+    fail "sha256sum or shasum not found. Cannot verify binary integrity."
   fi
 
   tar xzf "$tmpdir/$ASSET" -C "$tmpdir"
