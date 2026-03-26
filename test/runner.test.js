@@ -168,7 +168,153 @@ describe("validateName", () => {
   });
 });
 
+describe("redact", () => {
+  it("masks NVIDIA API keys", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("key is nvapi-abc123XYZ_def456")).toBe("key is nvap******************");
+  });
+
+  it("masks NVCF keys", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("nvcf-abcdef1234567890")).toBe("nvcf*****************");
+  });
+
+  it("masks bearer tokens", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload")).toBe(
+      "Authorization: Bearer eyJh********************"
+    );
+  });
+
+  it("masks key assignments in commands", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("export NVIDIA_API_KEY=nvapi-realkey12345")).toContain("nvap");
+    expect(redact("export NVIDIA_API_KEY=nvapi-realkey12345")).not.toContain("realkey12345");
+  });
+
+  it("masks variables ending in _KEY", () => {
+    const { redact } = require(runnerPath);
+    const output = redact('export SERVICE_KEY="supersecretvalue12345"');
+    expect(output).not.toContain("supersecretvalue12345");
+    expect(output).toContain('export SERVICE_KEY="supe');
+  });
+
+  it("masks bare GitHub personal access tokens", () => {
+    const { redact } = require(runnerPath);
+    const output = redact("token ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+    expect(output).toContain("ghp_");
+    expect(output).not.toContain("abcdefghijklmnopqrstuvwxyz1234567890");
+  });
+
+  it("masks bearer tokens case-insensitively", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("authorization: bearer someBearerToken")).toContain("some****");
+    expect(redact("authorization: bearer someBearerToken")).not.toContain("someBearerToken");
+    expect(redact("AUTHORIZATION: BEARER someBearerToken")).toContain("some****");
+    expect(redact("AUTHORIZATION: BEARER someBearerToken")).not.toContain("someBearerToken");
+  });
+
+  it("masks bearer tokens with repeated spacing", () => {
+    const { redact } = require(runnerPath);
+    const output = redact("Authorization: Bearer   someBearerToken");
+    expect(output).toContain("some****");
+    expect(output).not.toContain("someBearerToken");
+  });
+
+  it("masks quoted assignment values", () => {
+    const { redact } = require(runnerPath);
+    const output = redact('API_KEY="secret123abc"');
+    expect(output).not.toContain("secret123abc");
+    expect(output).toContain('API_KEY="sec');
+  });
+
+  it("masks multiple secrets in one string", () => {
+    const { redact } = require(runnerPath);
+    const output = redact("nvapi-firstkey12345 nvapi-secondkey67890");
+    expect(output).not.toContain("firstkey12345");
+    expect(output).not.toContain("secondkey67890");
+    expect(output).toContain("nvap******************");
+  });
+
+  it("leaves non-secret strings untouched", () => {
+    const { redact } = require(runnerPath);
+    expect(redact("docker run --name my-sandbox")).toBe("docker run --name my-sandbox");
+    expect(redact("openshell sandbox list")).toBe("openshell sandbox list");
+  });
+
+  it("handles non-string input gracefully", () => {
+    const { redact } = require(runnerPath);
+    expect(redact(null)).toBe(null);
+    expect(redact(undefined)).toBe(undefined);
+    expect(redact(42)).toBe(42);
+  });
+});
+
 describe("regression guards", () => {
+  it("runCapture redacts secrets before rethrowing errors", () => {
+    const originalExecSync = childProcess.execSync;
+    childProcess.execSync = () => {
+      throw new Error(
+        'command failed: export SERVICE_KEY="supersecretvalue12345" ghp_abcdefghijklmnopqrstuvwxyz1234567890'
+      );
+    };
+
+    try {
+      delete require.cache[require.resolve(runnerPath)];
+      const { runCapture } = require(runnerPath);
+
+      let error;
+      try {
+        runCapture("echo nope");
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain("ghp_");
+      expect(error.message).not.toContain("supersecretvalue12345");
+      expect(error.message).not.toContain("abcdefghijklmnopqrstuvwxyz1234567890");
+    } finally {
+      childProcess.execSync = originalExecSync;
+      delete require.cache[require.resolve(runnerPath)];
+    }
+  });
+
+  it("runCapture redacts execSync error cmd/output fields", () => {
+    const originalExecSync = childProcess.execSync;
+    childProcess.execSync = () => {
+      const err = new Error("command failed");
+      err.cmd = "echo nvapi-aaaabbbbcccc1111 && echo ghp_abcdefghijklmnopqrstuvwxyz123456";
+      err.output = ["stdout: nvapi-aaaabbbbcccc1111", "stderr: PASSWORD=secret123456"];
+      throw err;
+    };
+
+    try {
+      delete require.cache[require.resolve(runnerPath)];
+      const { runCapture } = require(runnerPath);
+
+      let error;
+      try {
+        runCapture("echo nope");
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeDefined();
+      expect(error).toBeInstanceOf(Error);
+      expect(error.cmd).not.toContain("nvapi-aaaabbbbcccc1111");
+      expect(error.cmd).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz123456");
+      expect(Array.isArray(error.output)).toBe(true);
+      expect(error.output[0]).not.toContain("nvapi-aaaabbbbcccc1111");
+      expect(error.output[1]).not.toContain("secret123456");
+      expect(error.output[0]).toContain("****");
+      expect(error.output[1]).toContain("****");
+    } finally {
+      childProcess.execSync = originalExecSync;
+      delete require.cache[require.resolve(runnerPath)];
+    }
+  });
+
   it("nemoclaw.js does not use execSync", () => {
     const src = fs.readFileSync(path.join(import.meta.dirname, "..", "bin", "nemoclaw.js"), "utf-8");
     const lines = src.split("\n");
