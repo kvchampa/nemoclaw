@@ -84,6 +84,69 @@ verify_config_integrity() {
   fi
 }
 
+fix_openclaw_config() {
+  python3 - <<'PYCFG'
+import json
+import os
+import shutil
+from urllib.parse import urlparse
+
+# /etc/openclaw/openclaw.json is the immutable template (baked into image).
+# We copy it to /tmp/openclaw/ for runtime mutations. The symlink at
+# ~/.openclaw/openclaw.json already points to /tmp/openclaw/openclaw.json.
+template_path = '/etc/openclaw/openclaw.json'
+runtime_dir = '/tmp/openclaw'
+runtime_path = os.path.join(runtime_dir, 'openclaw.json')
+
+# Prevent TOCTOU: wipe any pre-existing /tmp/openclaw/ that the sandboxed
+# agent might have planted before this (root-owned) entrypoint runs.
+import shutil as _shutil
+try:
+    _shutil.rmtree(runtime_dir)
+except FileNotFoundError:
+    pass
+os.makedirs(runtime_dir, mode=0o700)
+
+cfg = {}
+if os.path.exists(template_path):
+    with open(template_path) as f:
+        cfg = json.load(f)
+
+default_model = os.environ.get('NEMOCLAW_MODEL')
+if default_model:
+    cfg.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})['primary'] = default_model
+
+chat_ui_url = os.environ.get('CHAT_UI_URL', 'http://127.0.0.1:18789')
+parsed = urlparse(chat_ui_url)
+chat_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else 'http://127.0.0.1:18789'
+local_origin = f'http://127.0.0.1:{os.environ.get("PUBLIC_PORT", "18789")}'
+origins = [local_origin]
+if chat_origin not in origins:
+    origins.append(chat_origin)
+
+gateway = cfg.setdefault('gateway', {})
+gateway['mode'] = 'local'
+gateway['controlUi'] = {
+    'allowInsecureAuth': True,
+    'dangerouslyDisableDeviceAuth': True,
+    'allowedOrigins': origins,
+}
+gateway['trustedProxies'] = ['127.0.0.1', '::1']
+
+# Update symlink to point to the mutable runtime copy
+symlink = os.path.expanduser('~/.openclaw/openclaw.json')
+try:
+    os.unlink(symlink)
+except OSError:
+    pass
+os.symlink(runtime_path, symlink)
+
+with open(runtime_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+os.chmod(runtime_path, 0o600)
+PYCFG
+}
+
 write_auth_profile() {
   if [ -z "${NVIDIA_API_KEY:-}" ]; then
     return
@@ -113,7 +176,7 @@ print_dashboard_urls() {
     python3 - <<'PYTOKEN'
 import json
 import os
-path = '/sandbox/.openclaw/openclaw.json'
+path = '/tmp/openclaw/openclaw.json'
 try:
     cfg = json.load(open(path))
 except Exception:
@@ -210,6 +273,13 @@ PYAUTOPAIR
 echo 'Setting up NemoClaw...'
 [ -f .env ] && chmod 600 .env
 
+# openclaw doctor --fix and openclaw plugins install already ran at build time
+# (Dockerfile). At runtime they fail with EPERM against the locked
+# /sandbox/.openclaw directory and accomplish nothing.
+write_auth_profile
+export CHAT_UI_URL PUBLIC_PORT
+fix_openclaw_config
+
 # ── Non-root fallback ──────────────────────────────────────────
 # OpenShell runs containers with --security-opt=no-new-privileges, which
 # blocks gosu's setuid syscall. When we're not root, skip privilege
@@ -221,7 +291,6 @@ if [ "$(id -u)" -ne 0 ]; then
   if ! verify_config_integrity; then
     echo "[SECURITY WARNING] Config integrity check failed — proceeding anyway (non-root mode)"
   fi
-  write_auth_profile
 
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
     exec "${NEMOCLAW_CMD[@]}"

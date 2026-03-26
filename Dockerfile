@@ -70,14 +70,15 @@ ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_INFERENCE_COMPAT_B64=${NEMOCLAW_INFERENCE_COMPAT_B64}
 
 WORKDIR /sandbox
-USER sandbox
 
-# Write the COMPLETE openclaw.json including gateway config and auth token.
-# This file is immutable at runtime (Landlock read-only on /sandbox/.openclaw).
-# No runtime writes to openclaw.json are needed or possible.
-# Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
+# Write the COMPLETE openclaw.json to /etc/openclaw/ (immutable config dir).
+# This keeps the config outside the agent-writable zone entirely.
 # Auth token is generated per build so each image has a unique token.
-RUN python3 -c "\
+# At runtime, nemoclaw-start.sh copies this template to /tmp/openclaw/ for
+# any runtime mutations (e.g. auth profile injection).
+# Ref: #514, #516, #654
+USER root
+RUN mkdir -p /etc/openclaw && python3 -c "\
 import base64, json, os, secrets; \
 from urllib.parse import urlparse; \
 model = os.environ['NEMOCLAW_MODEL']; \
@@ -114,9 +115,15 @@ config = { \
         'auth': {'token': secrets.token_hex(32)} \
     } \
 }; \
-path = os.path.expanduser('~/.openclaw/openclaw.json'); \
-json.dump(config, open(path, 'w'), indent=2); \
-os.chmod(path, 0o600)"
+json.dump(config, open('/etc/openclaw/openclaw.json', 'w'), indent=2); \
+os.chmod('/etc/openclaw/openclaw.json', 0o444)" \
+    && chmod 555 /etc/openclaw
+USER sandbox
+
+# Symlink so OpenClaw finds config at the expected path.
+# At runtime, nemoclaw-start.sh replaces this with a link to /tmp/openclaw/
+# (mutable runtime copy of the immutable /etc template).
+RUN ln -sf /etc/openclaw/openclaw.json /sandbox/.openclaw/openclaw.json
 
 # Install NemoClaw plugin into OpenClaw
 RUN openclaw doctor --fix > /dev/null 2>&1 || true \
@@ -124,27 +131,27 @@ RUN openclaw doctor --fix > /dev/null 2>&1 || true \
 
 # Lock openclaw.json via DAC: chown to root so the sandbox user cannot modify
 # it at runtime.  This works regardless of Landlock enforcement status.
-# The Landlock policy (/sandbox/.openclaw in read_only) provides defense-in-depth
-# once OpenShell enables enforcement.
 # Ref: https://github.com/NVIDIA/NemoClaw/issues/514
-# Lock the entire .openclaw directory tree.
-# SECURITY: chmod 755 (not 1777) — the sandbox user can READ but not WRITE
-# to this directory. This prevents the agent from replacing symlinks
-# (e.g., pointing /sandbox/.openclaw/hooks to an attacker-controlled path).
-# The writable state lives in .openclaw-data, reached via the symlinks.
+#
+# Pin config hash FIRST — the directory is locked to 0555 afterwards and
+# no further writes are possible.
 # hadolint ignore=DL3002
 USER root
-RUN chown root:root /sandbox/.openclaw \
-    && find /sandbox/.openclaw -mindepth 1 -maxdepth 1 -exec chown -h root:root {} + \
-    && chmod 755 /sandbox/.openclaw \
-    && chmod 444 /sandbox/.openclaw/openclaw.json
-
-# Pin config hash at build time so the entrypoint can verify integrity.
-# Prevents the agent from creating a copy with a tampered config and
-# restarting the gateway pointing at it.
 RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
     && chmod 444 /sandbox/.openclaw/.config-hash \
     && chown root:root /sandbox/.openclaw/.config-hash
+
+# Lock the entire .openclaw directory tree.
+# SECURITY: chmod 555 — the sandbox user can READ but not WRITE
+# to this directory. This prevents the agent from replacing symlinks
+# (e.g., pointing /sandbox/.openclaw/hooks to an attacker-controlled path).
+# The writable state lives in .openclaw-data, reached via the symlinks.
+RUN chown root:root /sandbox/.openclaw \
+    && find /sandbox/.openclaw -mindepth 1 -maxdepth 1 -exec chown -h root:root {} + \
+    && chmod 0555 /sandbox/.openclaw \
+    && chmod 444 /sandbox/.openclaw/openclaw.json \
+    && chown -R sandbox:sandbox /sandbox/.openclaw-data/workspace \
+                                /sandbox/.openclaw-data/agents
 
 # Entrypoint runs as root to start the gateway as the gateway user,
 # then drops to sandbox for agent commands. See nemoclaw-start.sh.

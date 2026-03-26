@@ -36,8 +36,29 @@ filesystem_policy:
     - /dev/null
     - /sandbox/.openclaw-data       # Writable agent/plugin state (symlinked from .openclaw)
 
+# TODO: evaluate landlock enforce mode — currently best_effort because
+# enforce can break things in unpredictable ways. Needs thorough testing
+# across different kernel versions before we flip this. (ref #516 item 3)
 landlock:
   compatibility: best_effort
+
+# Prevent agents from tampering with their own config or killing the gateway.
+# This is defense-in-depth on top of the filesystem permission lock from #514.
+tool_policy:
+  deny:
+    - tool: write
+      paths:
+        - "**/.openclaw/openclaw.json"
+        - "/etc/openclaw/openclaw.json"
+        - "/tmp/openclaw/openclaw.json"
+    - tool: edit
+      paths:
+        - "**/.openclaw/openclaw.json"
+        - "/etc/openclaw/openclaw.json"
+        - "/tmp/openclaw/openclaw.json"
+    # NOTE: exec command restrictions are handled at the OpenShell/sandbox level
+    # via security=allowlist mode, not through tool_policy (which only gates tool
+    # names, not individual commands).
 
 process:
   run_as_user: sandbox
