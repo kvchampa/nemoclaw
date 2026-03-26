@@ -15,9 +15,44 @@
 
 set -euo pipefail
 
+# Harden: limit process count to prevent fork bombs (ref: #809)
+ulimit -Hu 512 || {
+  echo "[SECURITY] Failed to set hard nproc limit" >&2
+  exit 1
+}
+ulimit -Su 512 || {
+  echo "[SECURITY] Failed to set soft nproc limit" >&2
+  exit 1
+}
+
 # SECURITY: Lock down PATH so the agent cannot inject malicious binaries
 # into commands executed by the entrypoint or auto-pair watcher.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# ── Drop unnecessary Linux capabilities ──────────────────────────
+# CIS Docker Benchmark 5.3: containers should not run with default caps.
+# OpenShell manages the container runtime so we cannot pass --cap-drop=ALL
+# to docker run. Instead, drop dangerous capabilities from the bounding set
+# at startup using capsh. The bounding set limits what caps any child process
+# (gateway, sandbox, agent) can ever acquire.
+#
+# Kept: cap_chown, cap_setuid, cap_setgid, cap_fowner, cap_kill
+#   — required by the entrypoint for gosu privilege separation and chown.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/797
+if [ "${NEMOCLAW_CAPS_DROPPED:-}" != "1" ] && command -v capsh >/dev/null 2>&1; then
+  # capsh --drop requires CAP_SETPCAP in the bounding set. OpenShell's
+  # sandbox runtime may strip it, so check before attempting the drop.
+  if capsh --has-p=cap_setpcap 2>/dev/null; then
+    export NEMOCLAW_CAPS_DROPPED=1
+    exec capsh \
+      --drop=cap_net_raw,cap_dac_override,cap_sys_chroot,cap_fsetid,cap_setfcap,cap_mknod,cap_audit_write,cap_net_bind_service \
+      -- -c 'exec /usr/local/bin/nemoclaw-start "$@"' -- "$@"
+  else
+    echo "[SECURITY] CAP_SETPCAP not available — runtime already restricts capabilities" >&2
+  fi
+elif [ "${NEMOCLAW_CAPS_DROPPED:-}" != "1" ]; then
+  echo "[SECURITY WARNING] capsh not available — running with default capabilities" >&2
+fi
 
 # Filter out self-invocation: openshell sandbox create passes "nemoclaw-start"
 # as the command, but since this script is now the ENTRYPOINT, receiving our
@@ -103,7 +138,12 @@ PYTOKEN
 start_auto_pair() {
   # Run auto-pair as sandbox user (it talks to the gateway via CLI)
   # SECURITY: Pass resolved openclaw path to prevent PATH hijacking
-  OPENCLAW_BIN="$OPENCLAW" nohup gosu sandbox python3 - <<'PYAUTOPAIR' >>/tmp/auto-pair.log 2>&1 &
+  # When running as non-root, skip gosu (we're already the sandbox user)
+  local run_prefix=()
+  if [ "$(id -u)" -eq 0 ]; then
+    run_prefix=(gosu sandbox)
+  fi
+  OPENCLAW_BIN="$OPENCLAW" nohup "${run_prefix[@]}" python3 - <<'PYAUTOPAIR' >>/tmp/auto-pair.log 2>&1 &
 import json
 import os
 import subprocess
@@ -169,6 +209,44 @@ PYAUTOPAIR
 
 echo 'Setting up NemoClaw...'
 [ -f .env ] && chmod 600 .env
+
+# ── Non-root fallback ──────────────────────────────────────────
+# OpenShell runs containers with --security-opt=no-new-privileges, which
+# blocks gosu's setuid syscall. When we're not root, skip privilege
+# separation and run everything as the current user (sandbox).
+# Gateway process isolation is not available in this mode.
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[gateway] Running as non-root (uid=$(id -u)) — privilege separation disabled"
+  export HOME=/sandbox
+  if ! verify_config_integrity; then
+    echo "[SECURITY WARNING] Config integrity check failed — proceeding anyway (non-root mode)"
+  fi
+  write_auth_profile
+
+  if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
+    exec "${NEMOCLAW_CMD[@]}"
+  fi
+
+  # In non-root mode, detach gateway stdout/stderr from the sandbox-create
+  # stream so openshell sandbox create can return once the container is ready.
+  touch /tmp/gateway.log
+  chmod 600 /tmp/gateway.log
+
+  # Separate log for auto-pair in non-root mode as well.
+  touch /tmp/auto-pair.log
+  chmod 600 /tmp/auto-pair.log
+
+  # Start gateway in background, auto-pair, then wait
+  nohup "$OPENCLAW" gateway run >/tmp/gateway.log 2>&1 &
+  GATEWAY_PID=$!
+  echo "[gateway] openclaw gateway launched (pid $GATEWAY_PID)"
+  start_auto_pair
+  print_dashboard_urls
+  wait "$GATEWAY_PID"
+  exit $?
+fi
+
+# ── Root path (full privilege separation via gosu) ─────────────
 
 # Verify config integrity before starting anything
 verify_config_integrity

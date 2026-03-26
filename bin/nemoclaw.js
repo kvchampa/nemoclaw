@@ -17,7 +17,7 @@ const G = _useColor ? (_tc ? "\x1b[38;2;118;185;0m" : "\x1b[38;5;148m") : "";
 const B = _useColor ? "\x1b[1m" : "";
 const D = _useColor ? "\x1b[2m" : "";
 const R = _useColor ? "\x1b[0m" : "";
-const RD = _useColor ? "\x1b[1;31m" : "";
+const _RD = _useColor ? "\x1b[1;31m" : "";
 const YW = _useColor ? "\x1b[1;33m" : "";
 
 const { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName } = require("./lib/runner");
@@ -30,6 +30,7 @@ const {
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
+const { parseGatewayInference } = require("./lib/inference-config");
 
 // ── Global commands ──────────────────────────────────────────────
 
@@ -191,8 +192,8 @@ async function deploy(instanceName) {
     run(`scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
     run(`ssh -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'chmod 600 /home/ubuntu/nemoclaw/.env'`);
   } finally {
-    try { fs.unlinkSync(envTmp); } catch {}
-    try { fs.rmdirSync(envDir); } catch {}
+    try { fs.unlinkSync(envTmp); } catch { /* ignored */ }
+    try { fs.rmdirSync(envDir); } catch { /* ignored */ }
   }
 
   console.log("  Running setup...");
@@ -312,11 +313,14 @@ function sandboxConnect(sandboxName) {
 
 function sandboxStatus(sandboxName) {
   const sb = registry.getSandbox(sandboxName);
+  const live = parseGatewayInference(
+    runCapture("openshell inference get 2>/dev/null", { ignoreError: true })
+  );
   if (sb) {
     console.log("");
     console.log(`  Sandbox: ${sb.name}`);
-    console.log(`    Model:    ${sb.model || "unknown"}`);
-    console.log(`    Provider: ${sb.provider || "unknown"}`);
+    console.log(`    Model:    ${(live && live.model) || sb.model || "unknown"}`);
+    console.log(`    Provider: ${(live && live.provider) || sb.provider || "unknown"}`);
     console.log(`    GPU:      ${sb.gpuEnabled ? "yes" : "no"}`);
     console.log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
   }

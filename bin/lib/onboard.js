@@ -167,6 +167,7 @@ async function promptOrDefault(question, envVar, defaultValue) {
  * Strips ANSI codes and exact-matches the sandbox name in the first column.
  */
 function isSandboxReady(output, sandboxName) {
+  // eslint-disable-next-line no-control-regex
   const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
   return clean.split("\n").some((l) => {
     const cols = l.trim().split(/\s+/);
@@ -184,7 +185,7 @@ function hasStaleGateway(gwInfoOutput) {
   return typeof gwInfoOutput === "string" && gwInfoOutput.length > 0 && gwInfoOutput.includes(GATEWAY_NAME);
 }
 
-function streamSandboxCreate(command, env = process.env) {
+function streamSandboxCreate(command, env = process.env, options = {}) {
   const child = spawn("bash", ["-lc", command], {
     cwd: ROOT,
     env,
@@ -196,18 +197,38 @@ function streamSandboxCreate(command, env = process.env) {
   let lastPrintedLine = "";
   let sawProgress = false;
   let settled = false;
+  let polling = false;
+  const pollIntervalMs = options.pollIntervalMs || 2000;
+
+  function finish(result) {
+    if (settled) return;
+    settled = true;
+    if (pending) flushLine(pending);
+    if (readyTimer) clearInterval(readyTimer);
+    resolvePromise(result);
+  }
+
+  function detachChild() {
+    child.stdout?.removeAllListeners?.("data");
+    child.stderr?.removeAllListeners?.("data");
+    child.stdout?.destroy?.();
+    child.stderr?.destroy?.();
+    child.removeAllListeners?.("error");
+    child.removeAllListeners?.("close");
+    child.unref?.();
+  }
 
   function shouldShowLine(line) {
     return (
-      /^  Building image /.test(line) ||
-      /^  Context: /.test(line) ||
-      /^  Gateway: /.test(line) ||
+      /^ {2}Building image /.test(line) ||
+      /^ {2}Context: /.test(line) ||
+      /^ {2}Gateway: /.test(line) ||
       /^Successfully built /.test(line) ||
       /^Successfully tagged /.test(line) ||
-      /^  Built image /.test(line) ||
-      /^  Pushing image /.test(line) ||
+      /^ {2}Built image /.test(line) ||
+      /^ {2}Pushing image /.test(line) ||
       /^\s*\[progress\]/.test(line) ||
-      /^  Image .*available in the gateway/.test(line) ||
+      /^ {2}Image .*available in the gateway/.test(line) ||
       /^Created sandbox: /.test(line) ||
       /^✓ /.test(line)
     );
@@ -234,23 +255,53 @@ function streamSandboxCreate(command, env = process.env) {
   child.stdout.on("data", onChunk);
   child.stderr.on("data", onChunk);
 
+  let resolvePromise;
+  const readyTimer = options.readyCheck
+    ? setInterval(() => {
+        if (settled || polling) return;
+        polling = true;
+        try {
+          let ready = false;
+          try {
+            ready = !!options.readyCheck();
+          } catch {
+            return;
+          }
+          if (!ready) return;
+          const detail = "Sandbox reported Ready before create stream exited; continuing.";
+          lines.push(detail);
+          if (detail !== lastPrintedLine) {
+            console.log(`  ${detail}`);
+            lastPrintedLine = detail;
+          }
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // Best effort only — the child may have already exited.
+          }
+          detachChild();
+          finish({ status: 0, output: lines.join("\n"), sawProgress: true, forcedReady: true });
+        } finally {
+          polling = false;
+        }
+      }, pollIntervalMs)
+    : null;
+  readyTimer?.unref?.();
+
   return new Promise((resolve) => {
+    resolvePromise = resolve;
     child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      if (pending) flushLine(pending);
-      const detail = error && error.code
-        ? `spawn failed: ${error.message} (${error.code})`
+      // @ts-expect-error — Node ErrnoException has .code but TS types Error
+      const code = error && error.code;
+      const detail = code
+        ? `spawn failed: ${error.message} (${code})`
         : `spawn failed: ${error.message}`;
       lines.push(detail);
-      resolve({ status: 1, output: lines.join("\n"), sawProgress: false });
+      finish({ status: 1, output: lines.join("\n"), sawProgress: false });
     });
 
     child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      if (pending) flushLine(pending);
-      resolve({ status: code ?? 1, output: lines.join("\n"), sawProgress });
+      finish({ status: code ?? 1, output: lines.join("\n"), sawProgress });
     });
   });
 }
@@ -332,7 +383,7 @@ function upsertProvider(name, type, credentialEnv, baseUrl, env = {}) {
   }
 }
 
-function verifyInferenceRoute(provider, model) {
+function verifyInferenceRoute(_provider, _model) {
   const output = runCaptureOpenshell(["inference", "get"], { ignoreError: true });
   if (!output || /Gateway inference:\s*[\r\n]+\s*Not configured/i.test(output)) {
     console.error("  OpenShell inference route was not configured.");
@@ -352,10 +403,6 @@ function pruneStaleSandboxEntry(sandboxName) {
     registry.removeSandbox(sandboxName);
   }
   return liveExists;
-}
-
-function pythonLiteralJson(value) {
-  return JSON.stringify(JSON.stringify(value));
 }
 
 function buildSandboxConfigSyncScript(selectionConfig) {
@@ -384,8 +431,8 @@ function encodeDockerJsonArg(value) {
 }
 
 function getSandboxInferenceConfig(model, provider = null, preferredInferenceApi = null) {
-  let providerKey = "inference";
-  let primaryModelRef = model;
+  let providerKey;
+  let primaryModelRef;
   let inferenceBaseUrl = "https://inference.local/v1";
   let inferenceApi = preferredInferenceApi || "openai-completions";
   let inferenceCompat = null;
@@ -482,7 +529,7 @@ function summarizeProbeError(body, status) {
       parsed?.detail ||
       parsed?.details;
     if (message) return `HTTP ${status}: ${String(message)}`;
-  } catch {}
+  } catch { /* non-JSON body — fall through to raw text */ }
   const compact = String(body).replace(/\s+/g, " ").trim();
   return `HTTP ${status}: ${compact.slice(0, 200)}`;
 }
@@ -628,23 +675,6 @@ async function validateOpenAiLikeSelection(
       process.exit(1);
     }
     console.log(`  ${retryMessage}`);
-    console.log("");
-    return null;
-  }
-  console.log(`  ${probe.label} available — OpenClaw will use ${probe.api}.`);
-  return probe.api;
-}
-
-async function validateAnthropicSelection(label, endpointUrl, model, credentialEnv) {
-  const apiKey = getCredential(credentialEnv);
-  const probe = probeAnthropicEndpoint(endpointUrl, model, apiKey);
-  if (!probe.ok) {
-    console.error(`  ${label} endpoint validation failed.`);
-    console.error(`  ${probe.message}`);
-    if (isNonInteractive()) {
-      process.exit(1);
-    }
-    console.log("  Please choose a provider/model again.");
     console.log("");
     return null;
   }
@@ -1069,11 +1099,6 @@ function installOpenshell() {
   if (fs.existsSync(openshellPath) && futureShellPathHint) {
     process.env.PATH = `${localBin}${path.delimiter}${process.env.PATH}`;
   }
-  return {
-    installed: isOpenshellInstalled(),
-    localBin,
-    futureShellPathHint,
-  };
   OPENSHELL_BIN = resolveOpenshell();
   return {
     installed: OPENSHELL_BIN !== null,
@@ -1269,13 +1294,22 @@ async function preflight() {
   return gpu;
 }
 
+// ── Gateway cleanup ──────────────────────────────────────────────
+
+function destroyGateway() {
+  runOpenshell(["gateway", "destroy", "-g", GATEWAY_NAME], { ignoreError: true });
+  // openshell gateway destroy doesn't remove Docker volumes, which leaves
+  // corrupted cluster state that breaks the next gateway start. Clean them up.
+  run(`docker volume ls -q --filter "name=openshell-cluster-${GATEWAY_NAME}" | grep . && docker volume ls -q --filter "name=openshell-cluster-${GATEWAY_NAME}" | xargs docker volume rm || true`, { ignoreError: true });
+}
+
 // ── Step 2: Gateway ──────────────────────────────────────────────
 
-async function startGateway(gpu) {
+async function startGateway(_gpu) {
   step(3, 7, "Starting OpenShell gateway");
 
-  // Destroy old gateway
-  runOpenshell(["gateway", "destroy", "-g", GATEWAY_NAME], { ignoreError: true });
+  // Clean up any previous gateway and its Docker volumes
+  destroyGateway();
 
   const gwArgs = ["--name", GATEWAY_NAME];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
@@ -1294,7 +1328,13 @@ async function startGateway(gpu) {
     console.log(`  Using pinned OpenShell gateway image: ${stableGatewayImage}`);
   }
 
-  runOpenshell(["gateway", "start", ...gwArgs], { ignoreError: false, env: gatewayEnv });
+  const startResult = runOpenshell(["gateway", "start", ...gwArgs], { ignoreError: true, env: gatewayEnv });
+  if (startResult.status !== 0) {
+    console.error("  Gateway failed to start. Cleaning up stale state...");
+    destroyGateway();
+    console.error("  Stale state removed. Please rerun: nemoclaw onboard");
+    process.exit(1);
+  }
 
   // Verify health
   for (let i = 0; i < 5; i++) {
@@ -1304,7 +1344,9 @@ async function startGateway(gpu) {
       break;
     }
     if (i === 4) {
-      console.error("  Gateway failed to start. Run: openshell gateway info");
+      console.error("  Gateway health check failed. Cleaning up stale state...");
+      destroyGateway();
+      console.error("  Stale state removed. Please rerun: nemoclaw onboard");
       process.exit(1);
     }
     sleep(2);
@@ -1366,8 +1408,6 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
   }
 
   // Stage build context
-  const { mkdtempSync } = require("fs");
-  const os = require("os");
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   fs.copyFileSync(path.join(ROOT, "Dockerfile"), stagedDockerfile);
@@ -1420,7 +1460,12 @@ async function createSandbox(gpu, model, provider, preferredInferenceApi = null)
     ...envArgs,
     "nemoclaw-start",
   ])} 2>&1`;
-  const createResult = await streamSandboxCreate(createCommand, sandboxEnv);
+  const createResult = await streamSandboxCreate(createCommand, sandboxEnv, {
+    readyCheck: () => {
+      const list = runCaptureOpenshell(["sandbox", "list"], { ignoreError: true });
+      return isSandboxReady(list, sandboxName);
+    },
+  });
 
   // Clean up build context regardless of outcome
   run(`rm -rf "${buildCtx}"`, { ignoreError: true });
@@ -2109,6 +2154,68 @@ async function setupPolicies(sandboxName) {
 
 // ── Dashboard ────────────────────────────────────────────────────
 
+const CONTROL_UI_PORT = 18789;
+const CONTROL_UI_CHAT_PATH = "/chat?session=main";
+
+function findOpenclawJsonPath(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const found = findOpenclawJsonPath(p);
+      if (found) return found;
+    } else if (e.name === "openclaw.json") {
+      return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pull gateway.auth.token from the sandbox image via openshell sandbox download
+ * so onboard can print copy-paste Control UI URLs with #token= (same idea as nemoclaw-start.sh).
+ */
+function fetchGatewayAuthTokenFromSandbox(sandboxName) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-token-"));
+  try {
+    const destDir = `${tmpDir}${path.sep}`;
+    const result = runOpenshell(
+      ["sandbox", "download", sandboxName, "/sandbox/.openclaw/openclaw.json", destDir],
+      { ignoreError: true, stdio: ["ignore", "ignore", "ignore"] }
+    );
+    if (result.status !== 0) return null;
+    const jsonPath = findOpenclawJsonPath(tmpDir);
+    if (!jsonPath) return null;
+    const cfg = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+    const token = cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token;
+    return typeof token === "string" && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+function buildControlUiChatUrls(token) {
+  const hash = token ? `#token=${token}` : "";
+  const pathChat = `${CONTROL_UI_CHAT_PATH}${hash}`;
+  const bases = [
+    `http://127.0.0.1:${CONTROL_UI_PORT}`,
+    `http://localhost:${CONTROL_UI_PORT}`,
+  ];
+  const chatUi = (process.env.CHAT_UI_URL || "").trim().replace(/\/$/, "");
+  const urls = bases.map((b) => `${b}${pathChat}`);
+  if (chatUi && /^https?:\/\//i.test(chatUi) && !bases.includes(chatUi)) {
+    urls.push(`${chatUi}${pathChat}`);
+  }
+  return [...new Set(urls)];
+}
+
 function printDashboard(sandboxName, model, provider, nimContainer = null) {
   const nimStat = nimContainer ? nim.nimStatusByName(nimContainer) : nim.nimStatus(sandboxName);
   const nimLabel = nimStat.running ? "running" : "not running";
@@ -2123,6 +2230,8 @@ function printDashboard(sandboxName, model, provider, nimContainer = null) {
   else if (provider === "vllm-local") providerLabel = "Local vLLM";
   else if (provider === "ollama-local") providerLabel = "Local Ollama";
 
+  const token = fetchGatewayAuthTokenFromSandbox(sandboxName);
+
   console.log("");
   console.log(`  ${"─".repeat(50)}`);
   // console.log(`  Dashboard    http://localhost:18789/`);
@@ -2131,6 +2240,18 @@ function printDashboard(sandboxName, model, provider, nimContainer = null) {
   console.log(`  NIM          ${nimLabel}`);
   console.log(`  ${"─".repeat(50)}`);
   console.log(`  Next:`);
+  if (token) {
+    note("  URLs below embed the gateway token — treat them like a password.");
+    console.log(`  Control UI:  copy one line into your browser (port ${CONTROL_UI_PORT} must be forwarded):`);
+    for (const u of buildControlUiChatUrls(token)) {
+      console.log(`    ${u}`);
+    }
+  } else {
+    note("  Could not read gateway token from the sandbox (download failed).");
+    console.log(`  Control UI:  http://127.0.0.1:${CONTROL_UI_PORT}${CONTROL_UI_CHAT_PATH}`);
+    console.log(`  Token:       nemoclaw ${sandboxName} connect  →  jq -r '.gateway.auth.token' /sandbox/.openclaw/openclaw.json`);
+    console.log(`               append  #token=<token>  to the URL, or see /tmp/gateway.log inside the sandbox.`);
+  }
   console.log(`  Run:         nemoclaw ${sandboxName} connect`);
   console.log(`  Status:      nemoclaw ${sandboxName} status`);
   console.log(`  Logs:        nemoclaw ${sandboxName} logs --follow`);
