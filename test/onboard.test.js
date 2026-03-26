@@ -16,6 +16,7 @@ import {
   getSandboxInferenceConfig,
   getStableGatewayImageRef,
   patchStagedDockerfile,
+  resolveDashboardForwardTarget,
   writeSandboxConfigSyncFile,
 } from "../bin/lib/onboard";
 
@@ -249,6 +250,19 @@ const { setupInference } = require(${onboardPath});
 })().catch((error) => {
   console.error(error);
   process.exit(1);
+});
+
+describe("resolveDashboardForwardTarget", () => {
+  it("keeps localhost chat UI URLs bound to loopback", () => {
+    expect(resolveDashboardForwardTarget("http://127.0.0.1:18789")).toBe("18789");
+    expect(resolveDashboardForwardTarget("http://localhost:18789")).toBe("18789");
+    expect(resolveDashboardForwardTarget("http://[::1]:18789")).toBe("18789");
+  });
+
+  it("uses a public bind target for remote chat UI URLs", () => {
+    expect(resolveDashboardForwardTarget("https://chat.example.com")).toBe("0.0.0.0:18789");
+    expect(resolveDashboardForwardTarget("http://10.0.0.25:18789")).toBe("0.0.0.0:18789");
+  });
 });
 `;
     fs.writeFileSync(scriptPath, script);
