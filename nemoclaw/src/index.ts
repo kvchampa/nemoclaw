@@ -17,6 +17,8 @@ import {
   describeOnboardProvider,
   loadOnboardConfig,
 } from "./onboard/config.js";
+import { metrics } from "./observability/metrics.js";
+import { createServer } from "node:http";
 
 // ---------------------------------------------------------------------------
 // OpenClaw Plugin SDK compatible types (mirrors openclaw/plugin-sdk)
@@ -243,7 +245,37 @@ export default function register(api: OpenClawPluginApi): void {
     handler: (ctx) => handleSlashCommand(ctx, api),
   });
 
-  // 2. Register nvidia-nim provider — use onboard config if available
+  // 2. Register Metrics Service if enabled
+  if (metrics.isEnabled()) {
+    let server: ReturnType<typeof createServer> | undefined;
+
+    api.registerService({
+      id: "nemoclaw-metrics",
+      start: ({ logger }) => {
+        const port = Number(process.env.NEMOCLAW_METRICS_PORT || 9090);
+        server = createServer((req, res) => {
+          if (req.url === "/metrics") {
+            res.writeHead(200, { "Content-Type": "text/plain" });
+            res.end(metrics.getPrometheusMetrics());
+          } else {
+            res.writeHead(404);
+            res.end();
+          }
+        });
+        server.listen(port, "0.0.0.0", () => {
+          logger.info(`NemoClaw metrics server listening on port ${port}`);
+        });
+      },
+      stop: ({ logger }) => {
+        if (server) {
+          server.close();
+          logger.info("NemoClaw metrics server stopped");
+        }
+      },
+    });
+  }
+
+  // 3. Register nvidia-nim provider — use onboard config if available
   const onboardCfg = loadOnboardConfig();
   const providerCredentialEnv = onboardCfg?.credentialEnv ?? "NVIDIA_API_KEY";
   api.registerProvider(registeredProviderForConfig(onboardCfg, providerCredentialEnv));
