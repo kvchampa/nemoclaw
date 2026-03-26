@@ -16,30 +16,52 @@
  *   ALLOWED_CHAT_IDS    — comma-separated Telegram chat IDs to accept (optional, accepts all if unset)
  */
 
+const crypto = require("crypto");
 const https = require("https");
 const { execFileSync, spawn } = require("child_process");
 const { resolveOpenshell } = require("../bin/lib/resolve-openshell");
 const { shellQuote, validateName } = require("../bin/lib/runner");
 
-const OPENSHELL = resolveOpenshell();
-if (!OPENSHELL) {
-  console.error("openshell not found on PATH or in common locations");
-  process.exit(1);
+// Lazy-initialized by init() so requiring the module in tests does not
+// trigger process.exit from missing env vars or openshell resolution.
+let OPENSHELL;
+let TOKEN;
+let API_KEY;
+let SANDBOX;
+let ALLOWED_CHATS;
+
+function init() {
+  OPENSHELL = resolveOpenshell();
+  if (!OPENSHELL) {
+    console.error("openshell not found on PATH or in common locations");
+    process.exit(1);
+  }
+
+  TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  API_KEY = process.env.NVIDIA_API_KEY;
+  SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
+  try { validateName(SANDBOX, "SANDBOX_NAME"); } catch (e) { console.error(e.message); process.exit(1); }
+  ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS
+    ? process.env.ALLOWED_CHAT_IDS.split(",").map((s) => s.trim())
+    : null;
+
+  if (!TOKEN) { console.error("TELEGRAM_BOT_TOKEN required"); process.exit(1); }
+  if (!API_KEY) { console.error("NVIDIA_API_KEY required"); process.exit(1); }
 }
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const API_KEY = process.env.NVIDIA_API_KEY;
-const SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
-try { validateName(SANDBOX, "SANDBOX_NAME"); } catch (e) { console.error(e.message); process.exit(1); }
-const ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS
-  ? process.env.ALLOWED_CHAT_IDS.split(",").map((s) => s.trim())
-  : null;
-
-if (!TOKEN) { console.error("TELEGRAM_BOT_TOKEN required"); process.exit(1); }
-if (!API_KEY) { console.error("NVIDIA_API_KEY required"); process.exit(1); }
-
 let offset = 0;
-const activeSessions = new Map(); // chatId → message history
+const activeSessions = new Map(); // chatId → session UUID suffix
+
+function getSessionId(chatId) {
+  if (!activeSessions.has(chatId)) {
+    activeSessions.set(chatId, `${chatId}-${crypto.randomUUID()}`);
+  }
+  return activeSessions.get(chatId);
+}
+
+function rotateSession(chatId) {
+  activeSessions.set(chatId, `${chatId}-${crypto.randomUUID()}`);
+}
 
 // ── Telegram API helpers ──────────────────────────────────────────
 
@@ -140,18 +162,38 @@ function runAgentInSandbox(message, sessionId) {
       const response = responseLines.join("\n").trim();
 
       if (response) {
-        resolve(response);
+        resolve({ response, exitCode: code, stderr });
       } else if (code !== 0) {
-        resolve(`Agent exited with code ${code}. ${stderr.trim().slice(0, 500)}`);
+        resolve({ response: `Agent exited with code ${code}. ${stderr.trim().slice(0, 500)}`, exitCode: code, stderr });
       } else {
-        resolve("(no response)");
+        resolve({ response: "(no response)", exitCode: code, stderr });
       }
     });
 
     proc.on("error", (err) => {
-      resolve(`Error: ${err.message}`);
+      resolve({ response: `Error: ${err.message}`, exitCode: 1, stderr: err.message });
     });
   });
+}
+
+// ── Session lock detection ────────────────────────────────────────
+
+/**
+ * Returns true when an agent result indicates a session-file lock collision.
+ * Only matches the specific lock/corruption class of errors — not general failures.
+ * Exit code 255 alone is not sufficient (SSH uses it for connection errors too),
+ * so we require either an explicit lock message in stderr/response, or code 255
+ * combined with lock-related output.
+ */
+function isSessionLockFailure(result) {
+  const stderr = result.stderr || "";
+  // Always check stderr regardless of exit code.
+  if (stderr.includes("session file locked")) return true;
+  // Only check response text when the process actually failed — a successful
+  // reply that quotes the error string (e.g. explaining the error) is not a lock failure.
+  if (result.exitCode !== 0 && (result.response || "").includes("session file locked")) return true;
+  if (result.exitCode === 255 && /(session.*lock|lock.*session|session.*corrupt|corrupt.*session)/i.test(`${stderr} ${result.response || ""}`)) return true;
+  return false;
 }
 
 // ── Poll loop ─────────────────────────────────────────────────────
@@ -193,7 +235,7 @@ async function poll() {
 
         // Handle /reset
         if (msg.text === "/reset") {
-          activeSessions.delete(chatId);
+          rotateSession(chatId);
           await sendMessage(chatId, "Session reset.", msg.message_id);
           continue;
         }
@@ -205,10 +247,20 @@ async function poll() {
         const typingInterval = setInterval(() => sendTyping(chatId), 4000);
 
         try {
-          const response = await runAgentInSandbox(msg.text, chatId);
+          const result = await runAgentInSandbox(msg.text, getSessionId(chatId));
           clearInterval(typingInterval);
-          console.log(`[${chatId}] agent: ${response.slice(0, 100)}...`);
-          await sendMessage(chatId, response, msg.message_id);
+
+          // Detect session lock failures and auto-reset to prevent corrupted
+          // context from persisting into subsequent messages (#833).
+          if (isSessionLockFailure(result)) {
+            rotateSession(chatId);
+            console.error(`[${chatId}] session lock failure — session rotated`);
+            await sendMessage(chatId, "⚠️ Session error detected — your session has been automatically reset. Please resend your message.", msg.message_id);
+            continue;
+          }
+
+          console.log(`[${chatId}] agent: ${result.response.slice(0, 100)}...`);
+          await sendMessage(chatId, result.response, msg.message_id);
         } catch (err) {
           clearInterval(typingInterval);
           await sendMessage(chatId, `Error: ${err.message}`, msg.message_id);
@@ -249,4 +301,7 @@ async function main() {
   poll();
 }
 
-main();
+if (require.main === module) {
+  init();
+  main();
+}
